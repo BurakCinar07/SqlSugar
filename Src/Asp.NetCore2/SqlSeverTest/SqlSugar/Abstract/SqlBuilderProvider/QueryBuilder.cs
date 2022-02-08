@@ -643,7 +643,7 @@ namespace SqlSugar
                     result = result.Replace(" ) unionTable  ", ") "+TableShortName);
                     TableShortName = null;
                 }
-                if (this.TableShortName.HasValue())
+                if (this.TableShortName.HasValue() && !this.IsSqlQuery)
                 {
                     result += (TableShortName + UtilConstants.Space);
                 }
