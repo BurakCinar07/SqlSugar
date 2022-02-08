@@ -408,14 +408,18 @@ namespace SqlSugar
                             var jsonString = readerValues.First(it => it.Key.EqualCase(key)).Value;
                             if (jsonString != null)
                             {
-                                if (jsonString.ToString().First() == '{'&& jsonString.ToString().Last() == '}')
+                                if (jsonString.ToString().First() == '{' && jsonString.ToString().Last() == '}')
                                 {
                                     result.Add(name, this.DeserializeObject<Dictionary<string, object>>(jsonString + ""));
+                                } 
+                                else if (jsonString.ToString().Replace(" ","")!="[]"&&!jsonString.ToString().Contains("{")&&!jsonString.ToString().Contains("}")) 
+                                {
+                                    result.Add(name, this.DeserializeObject<dynamic>(jsonString + ""));
                                 }
-                                else 
+                                else
                                 {
                                     result.Add(name, this.DeserializeObject<List<Dictionary<string, object>>>(jsonString + ""));
-                                   
+
                                 }
                             }
                         }
@@ -432,10 +436,15 @@ namespace SqlSugar
                 {
                     var key = typeName + "." + name;
                     var info = readerValues.Select(it => it.Key).FirstOrDefault(it => it.ToLower() == key.ToLower());
+                    var oldInfo = info;
                     if (mappingKeys!=null&&mappingKeys.ContainsKey(item.Name)) 
                     {
                         key = mappingKeys[item.Name]+"."+typeName + "." + name;
                         info = readerValues.Select(it => it.Key).FirstOrDefault(it => it.ToLower() == key.ToLower());
+                    }
+                    if (info == null&&oldInfo!=null) 
+                    {
+                        info = oldInfo;
                     }
                     if (info != null)
                     {

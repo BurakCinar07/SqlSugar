@@ -31,6 +31,9 @@ namespace OrmTest
         }
         public static void Init()
         {
+            
+            UBulkCopy.Init();
+            Bulk();
             Insert();
             CodeFirst();
             Updateable();

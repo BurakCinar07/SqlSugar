@@ -384,7 +384,24 @@ namespace SqlSugar
                 sql = GetSql(exp, isSingle);
                 sql = sql.Replace(itName, shortName);
             }
-            WhereInfos.Add(sql);
+            if (item.IsJoinQuery == false||isMain||isSingle|| isEasyJoin)
+            {
+                WhereInfos.Add(sql);
+            }
+            else 
+            {
+                foreach (var joinInfo in this.JoinQueryInfos)
+                {
+                    if (joinInfo.TableName.EqualCase(entityInfo.EntityName)|| joinInfo.TableName.EqualCase(entityInfo.DbTableName)) 
+                    {
+                        if (sql.StartsWith(" WHERE ")) 
+                        {
+                            sql = Regex.Replace(sql, $"^ WHERE ", " AND ");
+                        }
+                        joinInfo.JoinWhere=joinInfo.JoinWhere + sql;
+                    }
+                }
+            }
         }
 
         private string GetSql(Expression exp, bool isSingle)
@@ -441,12 +458,12 @@ namespace SqlSugar
             return string.Format(temp, sql.ToString(), (pageIndex - 1) * pageSize + 1, pageIndex * pageSize);
         }
 
-        public virtual string GetSelectByItems(List<KeyValuePair<string, object>> items)
+        public virtual string GetSelectByItems(List<KeyValuePair<string, JoinMapper>> items)
         {
             var array = items.Select(it => {
-                dynamic dynamicObj = this.Context.Utilities.DeserializeObject<dynamic>(this.Context.Utilities.SerializeObject(it.Value));
-                var dbName = Builder.GetTranslationColumnName((string)(dynamicObj.dbName));
-                var asName = Builder.GetTranslationColumnName((string)(dynamicObj.asName));
+                JoinMapper dynamicObj = it.Value;
+                var dbName = Builder.GetTranslationColumnName(dynamicObj.DbName);
+                var asName = Builder.GetTranslationColumnName(dynamicObj.AsName);
                 return string.Format("{0}.{1} AS {2}", it.Key, dbName, asName);
             });
             return string.Join(",", array);

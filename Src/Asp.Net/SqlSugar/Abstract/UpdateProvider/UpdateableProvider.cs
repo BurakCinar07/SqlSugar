@@ -840,11 +840,22 @@ namespace SqlSugar
             if (this.UpdateParameterIsNull)
             {
                 var whereSql = Regex.Replace(sql, ".* WHERE ", "", RegexOptions.Singleline);
+                if (sql.Contains("WHERE (EXISTS")) 
+                {
+                    whereSql=Regex.Match(sql, @"\(EXISTS.+").Value;
+                }
                 dt = this.Context.Queryable<T>().Where(whereSql).AddParameters(parameters).ToDataTable();
             }
             else 
             {
-                dt=this.Context.Queryable<T>().WhereClassByPrimaryKey(this.UpdateObjs.ToList()).ToDataTable();
+                if (this.UpdateObjs.ToList().Count == 0)
+                {
+                    dt = new DataTable();
+                }
+                else
+                {
+                    dt = this.Context.Queryable<T>().WhereClassByPrimaryKey(this.UpdateObjs.ToList()).ToDataTable();
+                }
             }
             if (dt.Rows != null && dt.Rows.Count > 0)
             {
@@ -856,10 +867,13 @@ namespace SqlSugar
                     item.Columns = new List<DiffLogColumnInfo>();
                     foreach (DataColumn col in dt.Columns)
                     {
+                        var sugarColumn = this.EntityInfo.Columns.Where(it => it.DbColumnName != null).First(it =>
+                            it.DbColumnName.Equals(col.ColumnName, StringComparison.CurrentCultureIgnoreCase));
                         DiffLogColumnInfo addItem = new DiffLogColumnInfo();
                         addItem.Value = row[col.ColumnName];
                         addItem.ColumnName = col.ColumnName;
-                        addItem.ColumnDescription = this.EntityInfo.Columns.Where(it => it.DbColumnName != null).First(it => it.DbColumnName.Equals(col.ColumnName, StringComparison.CurrentCultureIgnoreCase)).ColumnDescription;
+                        addItem.IsPrimaryKey = sugarColumn.IsPrimarykey;
+                        addItem.ColumnDescription = sugarColumn.ColumnDescription;
                         item.Columns.Add(addItem);
                     }
                     result.Add(item);

@@ -96,6 +96,32 @@ namespace OrmTest
             }).ToSql();
             UValidate.Check(x.Key, "SELECT  [a] AS [a]  FROM [BoolTest2] ", "Queryable");
 
+            Db.CodeFirst.InitTables<BoolTest3>();
+            var  blist3= Db.Queryable<BoolTest3>().Select(it => new BoolTest3()
+            {
+                a = string.IsNullOrEmpty(it.Name)
+            }).ToList();
+
+            var blist4 = Db.Queryable<BoolTest3>().Select(it => new BoolTest3()
+            {
+                a = SqlFunc.IIF(it.a == true, true, false)
+            }).ToList();
+
+
+            var blist5 = Db.Queryable<BoolTest3>().Select(it => new BoolTest3()
+            {
+                a = SqlFunc.IF(it.a == true).Return(true).End(false)
+            }).ToList();
+
+            var blist6 = Db.Queryable<BoolTest3>().Select(it => new BoolTest3()
+            {
+                a =it.a==true?true:false
+            }).ToList();
+
+            var blist7 = Db.Queryable<BoolTest3>().Select(it => new BoolTest3()
+            {
+                a = SqlFunc.Subqueryable<Order>().Any()
+            }).ToList();
             var db = Db;
             db.CodeFirst.InitTables<UserInfo, UserIpRuleInfo>();
             db.Deleteable<UserInfo>().ExecuteCommand();
@@ -518,5 +544,10 @@ namespace OrmTest
     public class BoolTest2
     {
         public bool? a { get; set; }
+    }
+    public class BoolTest3
+    {
+        public bool? a { get; set; }
+        public string Name { get; set; }
     }
 }

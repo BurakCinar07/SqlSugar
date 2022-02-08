@@ -2,15 +2,14 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
-    <Version>5.0.5.1</Version>
+    <Version>1.1.0</Version>
     <Copyright>sun_kai_xuan</Copyright>
-    <PackageProjectUrl>https://github.com/sunkaixuan/SqlSugar</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/BurakCinar07/SqlSugar/tree/SqlSugar5</PackageProjectUrl>
     <PackageLicenseUrl></PackageLicenseUrl>
     <PackageIconUrl></PackageIconUrl>
-    <PackageId>SqlSugar</PackageId>
-    <Description>果糖大数据科技（南通）有限公司</Description>
-    <Company>果糖大数据科技（南通）有限公司</Company>
-    <Authors>果糖大数据科技（南通）有限公司</Authors>
+    <PackageId>MgaSqlSugar</PackageId>
+    <Description>Fork of sqlsugar https://github.com/donet5/SqlSugar</Description>
+    <Authors>Burak ÇINAR</Authors>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="2.2.4" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="5.0.5" />
     <PackageReference Include="MySql.Data" Version="8.0.21" />
     <PackageReference Include="Newtonsoft.Json" Version="10.0.3" />
     <PackageReference Include="Npgsql" Version="6.0.2" />
@@ -31,6 +30,10 @@
     <PackageReference Include="System.Data.Common" Version="4.3.0" />
 	<PackageReference Include="Microsoft.Data.SqlClient" Version="2.1.1" />
     <PackageReference Include="System.Reflection.Emit.Lightweight" Version="4.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Abstract\QueryableProvider\QueryableProvider\" />
   </ItemGroup>
 
 </Project>

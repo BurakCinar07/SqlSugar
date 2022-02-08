@@ -18,7 +18,7 @@ namespace SqlSugar
                 case DbType.SqlServer:
                     return new SqlServerFastBuilder();
                 case DbType.Sqlite:
-                    break;
+                    return new SqliteFastBuilder(this.entityInfo);
                 case DbType.Oracle:
                     return new OracleFastBuilder(this.entityInfo);
                 case DbType.PostgreSQL:
@@ -127,5 +127,58 @@ namespace SqlSugar
             }
             return value;
         }
+        private DataTable GetCopyWriteDataTable(DataTable dt)
+        {
+            DataTable tempDataTable = ReflectionInoCore<DataTable>.GetInstance().GetOrCreate("BulkCopyAsync_dt" + dt.TableName,
+            () =>
+            {
+                if (AsName == null)
+                {
+                    return queryable.Where(it => false).Select("*").ToDataTable();
+                }
+                else
+                {
+                    return queryable.AS(AsName).Where(it => false).Select("*").ToDataTable();
+                }
+            }
+            );
+            var temColumnsList = tempDataTable.Columns.Cast<DataColumn>().Select(it => it.ColumnName.ToLower()).ToList();
+            var columns = dt.Columns.Cast<DataColumn>().Where(it => temColumnsList.Contains(it.ColumnName.ToLower())).ToList();
+            foreach (DataRow item in dt.Rows)
+            {
+                DataRow dr = tempDataTable.NewRow();
+                foreach (DataColumn column in columns)
+                {
+
+                    dr[column.ColumnName] = item[column.ColumnName];
+                    if (dr[column.ColumnName] == null)
+                    {
+                        dr[column.ColumnName] = DBNull.Value;
+                    }
+                }
+                tempDataTable.Rows.Add(dr);
+            }
+            tempDataTable.TableName = dt.TableName;
+            return tempDataTable;
+        }
+
+
+        private void RemoveCache()
+        {
+            if (!string.IsNullOrEmpty(CacheKey) || !string.IsNullOrEmpty(CacheKeyLike))
+            {
+                Check.Exception(this.context.CurrentConnectionConfig.ConfigureExternalServices?.DataInfoCacheService == null, "ConnectionConfig.ConfigureExternalServices.DataInfoCacheService is null");
+                var service = this.context.CurrentConnectionConfig.ConfigureExternalServices?.DataInfoCacheService;
+                if (!string.IsNullOrEmpty(CacheKey)) 
+                {
+                    CacheSchemeMain.RemoveCache(service, CacheKey);
+                }
+                if (!string.IsNullOrEmpty(CacheKeyLike))
+                {
+                    CacheSchemeMain.RemoveCacheByLike(service, CacheKeyLike);
+                }
+            }
+        }
+
     }
 }

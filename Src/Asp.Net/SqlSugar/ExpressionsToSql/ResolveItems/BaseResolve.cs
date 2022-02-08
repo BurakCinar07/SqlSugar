@@ -477,19 +477,19 @@ namespace SqlSugar
                     {
                         asName = GetAsNameAndShortName(item, shortName, property);
                     }
-                    else 
+                    else
                     {
                         asName = GetAsName(item, shortName, property);
                     }
                 }
             }
-            else if (item.Type == UtilConstants.BoolType && item is MethodCallExpression && (item as MethodCallExpression).Method.Name == "Any"&&IsSubMethod(item as MethodCallExpression))
+            else if (item.Type == UtilConstants.BoolType && item is MethodCallExpression && IsNotCaseExpression(item))
             {
                 this.Expression = item;
                 this.Start();
                 var sql= this.Context.DbMehtods.IIF(new MethodCallExpressionModel()
                 {
-                     Args=new List<MethodCallExpressionArgs>() {
+                    Args=new List<MethodCallExpressionArgs>() {
                           new MethodCallExpressionArgs() {
                                IsMember=true,
                                MemberName=parameter.CommonTempData.ObjToString()
@@ -515,6 +515,26 @@ namespace SqlSugar
             else
             {
                 Check.ThrowNotSupportedException(item.GetType().Name);
+            }
+        }
+
+        private static bool IsNotCaseExpression(Expression item)
+        {
+            if ((item as MethodCallExpression).Method.Name == "IIF")
+            {
+                return false;
+            }
+            else if ((item as MethodCallExpression).Method.Name == "IsNull")
+            {
+                return false;
+            }
+            else if ((item as MethodCallExpression).Method.Name == "End"&&item.ToString().Contains("IF("))
+            {
+                return false;
+            }
+            else 
+            {
+                return true;
             }
         }
 
@@ -605,7 +625,14 @@ namespace SqlSugar
             {
                 dbColumnName = mappingInfo.DbColumnName;
             }
-            asName = this.Context.GetTranslationText(shortName+"."+item.Type.Name + "." + propertyName);
+            if (shortName != null && shortName.ObjToString().Contains(this.Context.SqlTranslationLeft)&&this.Context.IsSingle)
+            {
+                asName = this.Context.GetTranslationText(item.Type.Name + "." + propertyName);
+            }
+            else
+            {
+                asName = this.Context.GetTranslationText(shortName + "." + item.Type.Name + "." + propertyName);
+            }
             if (Context.IsJoin)
             {
                 this.Context.Result.Append(Context.GetAsString(asName, dbColumnName, shortName.ObjToString()));
