@@ -328,6 +328,11 @@ namespace SqlSugar
                     {
                         value = value.Replace("= \"SYSDATE\"", "= SYSDATE");
                     }
+
+                    var param = UpdateBuilder.Parameters.First(x => x.ParameterName == item.Split(" = ")[1].Trim());
+                    var columnInfo = UpdateBuilder.DbColumnInfoList.First(x => x.DbColumnName == key);
+                    param.IsArray = columnInfo.IsArray;
+                    param.IsJson = columnInfo.IsJson;
                     UpdateBuilder.SetValues.Add(new KeyValuePair<string, string>(SqlBuilder.GetTranslationColumnName(key), value));
                 }
             }
@@ -846,8 +851,12 @@ namespace SqlSugar
                 }
                 dt = this.Context.Queryable<T>().Where(whereSql).AddParameters(parameters).ToDataTable();
             }
-            else 
+            else
             {
+                var pkColumn = this.UpdateBuilder.Builder.SqlParameterKeyWord + this.UpdateBuilder.PrimaryKeys.First();
+                if (parameters.All(x => x.ParameterName != pkColumn))
+                    throw new SqlSugarException(
+                        "Primary key not exists for audit. Either add primary key value to object or use expression type.");
                 if (this.UpdateObjs.ToList().Count == 0)
                 {
                     dt = new DataTable();
