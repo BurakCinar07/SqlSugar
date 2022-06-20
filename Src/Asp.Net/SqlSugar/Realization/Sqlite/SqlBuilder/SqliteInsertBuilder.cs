@@ -47,6 +47,7 @@ namespace SqlSugar
             if (isSingle)
             {
                 string columnParametersString = string.Join(",", this.DbColumnInfoList.Select(it => Builder.SqlParameterKeyWord + it.DbColumnName));
+                ActionMinDate();
                 return string.Format(SqlTemplate, GetTableNameString, columnsString, columnParametersString);
             }
             else
@@ -91,11 +92,18 @@ namespace SqlSugar
                 if (type == UtilConstants.DateType)
                 {
                     var date = value.ObjToDate();
-                    if (date < Convert.ToDateTime("1900-1-1"))
+                    if (date < UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig))
                     {
-                        date = Convert.ToDateTime("1900-1-1");
+                        date = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
                     }
-                    return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+                    if (this.Context.CurrentConnectionConfig?.MoreSettings?.DisableMillisecond == true)
+                    {
+                        return "'" + date.ToString("yyyy-MM-dd HH:mm:ss") + "'";
+                    }
+                    else
+                    {
+                        return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+                    }
                 }
                 else if (type.IsEnum())
                 {

@@ -170,7 +170,15 @@ namespace SqlSugar
                         + Context.ParameterIndex;
                     if (value.ObjToString() != "NULL" && !parameter.ValueIsNull)
                     {
-                        this.Context.Parameters.Add(new SugarParameter(appendValue, value));
+                        EntityColumnInfo columnInfo = GetColumnInfo(oppoSiteExpression);
+                        if (columnInfo != null && columnInfo.SqlParameterDbType != null&& columnInfo.SqlParameterDbType is  System.Data.DbType)
+                        {
+                            this.Context.Parameters.Add(new SugarParameter(appendValue, value, (System.Data.DbType)columnInfo.SqlParameterDbType));
+                        }
+                        else
+                        {
+                            this.Context.Parameters.Add(new SugarParameter(appendValue, value));
+                        }
                     }
                     else
                     {
@@ -251,6 +259,19 @@ namespace SqlSugar
                 }
             }
         }
+
+        private EntityColumnInfo GetColumnInfo(Expression oppoSiteExpression)
+        {
+            var oppsite = (oppoSiteExpression as MemberExpression);
+            if (oppsite == null) return null;
+            if (this.Context.SugarContext == null) return null;
+            if (this.Context.SugarContext.Context == null) return null;
+            if (oppsite.Expression == null) return null;
+            var columnInfo = this.Context.SugarContext.Context.EntityMaintenance
+                .GetEntityInfo(oppsite.Expression.Type).Columns.FirstOrDefault(it => it.PropertyName == oppsite.Member.Name);
+            return columnInfo;
+        }
+
         protected void AppendOpreator(ExpressionParameter parameter, bool? isLeft)
         {
             if (isLeft == true)
@@ -319,10 +340,24 @@ namespace SqlSugar
             return methodCallExpressionArgs;
         }
 
-        protected string GetNewExpressionValue(Expression item)
+        public string GetNewExpressionValue(Expression item)
         {
             var newContext = this.Context.GetCopyContextWithMapping();
+            newContext.SugarContext = this.Context.SugarContext;
             newContext.Resolve(item, this.Context.IsJoin ? ResolveExpressType.WhereMultiple : ResolveExpressType.WhereSingle);
+            this.Context.Index = newContext.Index;
+            this.Context.ParameterIndex = newContext.ParameterIndex;
+            if (newContext.Parameters.HasValue())
+            {
+                this.Context.Parameters.AddRange(newContext.Parameters);
+            }
+            return newContext.Result.GetResultString();
+        }
+        public string GetNewExpressionValue(Expression item,ResolveExpressType type)
+        {
+            var newContext = this.Context.GetCopyContextWithMapping();
+            newContext.SugarContext = this.Context.SugarContext;
+            newContext.Resolve(item, type);
             this.Context.Index = newContext.Index;
             this.Context.ParameterIndex = newContext.ParameterIndex;
             if (newContext.Parameters.HasValue())
@@ -472,6 +507,15 @@ namespace SqlSugar
                         {
                             asName = GetAsName(item, shortName, property);
                         }
+                        else if (comumnInfo!=null&&this.Context.SugarContext != null&&this.Context.SugarContext.Context != null) 
+                        {
+                           var entityInfo=this.Context.SugarContext.Context.EntityMaintenance.GetEntityInfo(item.Type);
+                           var entityColumn = entityInfo.Columns.FirstOrDefault(it => it.PropertyName == property.Name);
+                           if (entityColumn != null && entityColumn.IsJson) 
+                           {
+                                asName = GetAsName(item, shortName, property);
+                           }
+                        }
                     }
                     else if (isSameType)
                     {
@@ -506,6 +550,13 @@ namespace SqlSugar
                 });
                 parameter.Context.Result.Append(this.Context.GetAsString(asName, sql));
             }
+            else if (item.NodeType == ExpressionType.Not 
+                && (item as UnaryExpression).Operand is MethodCallExpression
+                && ((item as UnaryExpression).Operand as MethodCallExpression).Method.Name.IsIn("IsNullOrEmpty", "IsNullOrWhiteSpace"))
+            {
+                var asValue =  packIfElse(GetNewExpressionValue(item)).ObjToString();
+                parameter.Context.Result.Append(this.Context.GetAsString(asName, asValue));
+            }
             else if (item is MethodCallExpression || item is UnaryExpression || item is ConditionalExpression || item.NodeType == ExpressionType.Coalesce)
             {
                 this.Expression = item;
@@ -517,7 +568,15 @@ namespace SqlSugar
                 Check.ThrowNotSupportedException(item.GetType().Name);
             }
         }
-
+        public object packIfElse(object methodValue)
+        {
+            methodValue = this.Context.DbMehtods.CaseWhen(new List<KeyValuePair<string, string>>() {
+                    new KeyValuePair<string, string>("IF",methodValue.ObjToString()),
+                    new KeyValuePair<string, string>("Return","1"),
+                    new KeyValuePair<string, string>("End","0")
+                 });
+            return methodValue;
+        }
         private static bool IsNotCaseExpression(Expression item)
         {
             if ((item as MethodCallExpression).Method.Name == "IIF")
@@ -549,6 +608,10 @@ namespace SqlSugar
                 return false;
             }
             else if ((item as MethodCallExpression).Method.Name == "ToBoolean")
+            {
+                return false;
+            }
+            else if ((item as MethodCallExpression).Method.Name == "Select"&& item.ToString().Contains("Subqueryable()"))
             {
                 return false;
             }
@@ -608,11 +671,27 @@ namespace SqlSugar
                 {
                     first = first.Split('(').Last().Trim();
                 }
-                result.Add(first,last);
+                if (!result.ContainsKey(first))
+                {
+                    result.Add(first, last);
+                }
+                else 
+                {
+                    //future
+                }
             }
             return result; ;
         }
-
+        protected void SetNavigateResult()
+        {
+            if (this.Context != null)
+            {
+                if (this.Context.Result != null)
+                {
+                    this.Context.Result.IsNavicate = true;
+                }
+            }
+        }
         private string GetAsName(Expression item, object shortName, PropertyInfo property)
         {
             string asName;

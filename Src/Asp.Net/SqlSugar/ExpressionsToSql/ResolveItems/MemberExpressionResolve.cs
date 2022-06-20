@@ -23,8 +23,8 @@ namespace SqlSugar
             else if (IsDateDiff(expression))
             {
                 ResolveDateDiff(parameter, isLeft, expression);
-            } 
-            else if (expression.Member.Name== "DayOfWeek"&& expression.Type==typeof(DayOfWeek)) 
+            }
+            else if (expression.Member.Name == "DayOfWeek" && expression.Type == typeof(DayOfWeek))
             {
                 ResolveDayOfWeek(parameter, isLeft, expression);
             }
@@ -56,9 +56,55 @@ namespace SqlSugar
             {
                 ResolveDateDate(parameter, isLeft, expression);
             }
+            else if (IsConvertMemberName(expression))
+            {
+                var memParameter = (expression.Expression as UnaryExpression).Operand as ParameterExpression;
+                var name = ExpressionTool.GetMemberName(expression);
+                if (this.Context.IsSingle)
+                {
+                    AppendMember(parameter, isLeft, this.Context.GetTranslationColumnName(name));
+                }
+                else 
+                {
+                    AppendMember(parameter, isLeft, this.Context.GetTranslationColumnName(memParameter.Name + "." + name));
+                }
+            }
             else if (isMemberValue)
             {
-                ResolveMemberValue(parameter, baseParameter, isLeft, isSetTempData, expression);
+                var nav = new OneToOneNavgateExpression(this.Context?.SugarContext?.Context);
+                var navN = new OneToOneNavgateExpressionN(this.Context?.SugarContext?.Context);
+                if (nav.IsNavgate(expression))
+                {
+                    var value = nav.GetSql();
+                    SetNavigateResult();
+                    this.Context.SingleTableNameSubqueryShortName = nav.ShorName;
+                    if (isSetTempData)
+                    {
+                        baseParameter.CommonTempData = value;
+                    }
+                    else
+                    {
+                        AppendValue(parameter, isLeft, value);
+                    }
+                }
+                else if (navN.IsNavgate(expression))
+                {
+                    var value = navN.GetMemberSql();
+                    SetNavigateResult();
+                    this.Context.SingleTableNameSubqueryShortName = navN.shorName;
+                    if (isSetTempData)
+                    {
+                        baseParameter.CommonTempData = value;
+                    }
+                    else
+                    {
+                        AppendValue(parameter, isLeft, value);
+                    }
+                }
+                else
+                {
+                    ResolveMemberValue(parameter, baseParameter, isLeft, isSetTempData, expression);
+                }
             }
             else if (fieldIsBool && !isField && !isSelectField)
             {
@@ -68,6 +114,11 @@ namespace SqlSugar
             {
                 ResolveDefault(parameter, baseParameter, expression, isLeft, isSetTempData, isSingle);
             }
+        }
+
+        private static bool IsConvertMemberName(MemberExpression expression)
+        {
+            return expression.Expression is UnaryExpression && (expression.Expression as UnaryExpression).Operand is ParameterExpression;
         }
 
 

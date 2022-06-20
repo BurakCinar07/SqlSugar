@@ -62,6 +62,14 @@ namespace SqlSugar
             }
             this.OrderByValue = oldOrderValue;
             result = GetSqlQuerySql(result);
+            if (result.IndexOf("-- No table") > 0)
+            {
+                return "-- No table";
+            }
+            if (TranLock != null)
+            {
+                result = result + TranLock;
+            }
             return result;
         }
         private  string ToCountSqlString()

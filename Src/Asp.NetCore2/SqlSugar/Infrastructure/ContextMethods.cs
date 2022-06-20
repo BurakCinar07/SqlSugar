@@ -294,7 +294,8 @@ namespace SqlSugar
                     }
                     else if (IsJsonList(readerValues, item))
                     {
-                        result.Add(name, DeserializeObject<List<Dictionary<string, object>>>(readerValues[item.Name.ToLower()].ToString()));
+                        var json = readerValues.First(y => y.Key.EqualCase(item.Name)).Value.ToString();
+                        result.Add(name, DeserializeObject<List<Dictionary<string, object>>>(json));
                     }
                     else if (IsBytes(readerValues, item))
                     {
@@ -374,10 +375,10 @@ namespace SqlSugar
         private static bool IsJsonList(Dictionary<string, object> readerValues, PropertyInfo item)
         {
             return item.PropertyType.FullName.IsCollectionsList() &&
-                                        readerValues.ContainsKey(item.Name.ToLower()) &&
-                                        readerValues[item.Name.ToLower()] != null &&
-                                        readerValues[item.Name.ToLower()].GetType() == UtilConstants.StringType &&
-                                        Regex.IsMatch(readerValues[item.Name.ToLower()].ToString(), @"^\[{.+\}]$");
+                                        readerValues.Any(y=>y.Key.EqualCase(item.Name)) &&
+                                        readerValues.First(y => y.Key.EqualCase(item.Name)).Value != null &&
+                                        readerValues.First(y => y.Key.EqualCase(item.Name)).Value.GetType() == UtilConstants.StringType &&
+                                        Regex.IsMatch(readerValues.First(y => y.Key.EqualCase(item.Name)).Value.ToString(), @"^\[{.+\}]$");
         }
 
         private Dictionary<string, object> DataReaderToDynamicList_Part<T>(Dictionary<string, object> readerValues, PropertyInfo item, List<T> reval, Dictionary<string, string> mappingKeys=null)
@@ -393,6 +394,7 @@ namespace SqlSugar
                 return null;
             }
             var classProperties = type.GetProperties().ToList();
+            var columns = this.Context.EntityMaintenance.GetEntityInfo(type).Columns;
             foreach (var prop in classProperties)
             {
                 var name = prop.Name;
@@ -402,29 +404,14 @@ namespace SqlSugar
                     var suagrColumn=prop.GetCustomAttribute<SugarColumn>();
                     if (suagrColumn != null && suagrColumn.IsJson)
                     {
-                        var key = (typeName + "." + name).ToLower();
-                        if (readerValues.Any(it=>it.Key.EqualCase(key)))
+                        Json(readerValues, result, name, typeName);
+                    }
+                    else if (columns.Any(it => it.IsJson))
+                    {
+                        var column = columns.FirstOrDefault(it => it.PropertyName == name);
+                        if (column != null && column.IsJson) 
                         {
-                            var jsonString = readerValues.First(it => it.Key.EqualCase(key)).Value;
-                            if (jsonString != null)
-                            {
-                                if (jsonString.ToString().First() == '{' && jsonString.ToString().Last() == '}')
-                                {
-                                    result.Add(name, this.DeserializeObject<Dictionary<string, object>>(jsonString + ""));
-                                } 
-                                else if (jsonString.ToString().Replace(" ","")!="[]"&&!jsonString.ToString().Contains("{")&&!jsonString.ToString().Contains("}")) 
-                                {
-                                    result.Add(name, this.DeserializeObject<dynamic>(jsonString + ""));
-                                }
-                                else
-                                {
-                                    result.Add(name, this.DeserializeObject<List<Dictionary<string, object>>>(jsonString + ""));
-
-                                }
-                            }
-                        }
-                        else 
-                        {
+                            Json(readerValues, result, name, typeName);
                         }
                     }
                     else
@@ -460,6 +447,34 @@ namespace SqlSugar
                 }
             }
             return result;
+        }
+
+        private void Json(Dictionary<string, object> readerValues, Dictionary<string, object> result, string name, string typeName)
+        {
+            var key = (typeName + "." + name).ToLower();
+            if (readerValues.Any(it => it.Key.EqualCase(key)))
+            {
+                var jsonString = readerValues.First(it => it.Key.EqualCase(key)).Value;
+                if (jsonString != null)
+                {
+                    if (jsonString.ToString().First() == '{' && jsonString.ToString().Last() == '}')
+                    {
+                        result.Add(name, this.DeserializeObject<Dictionary<string, object>>(jsonString + ""));
+                    }
+                    else if (jsonString.ToString().Replace(" ", "") != "[]" && !jsonString.ToString().Contains("{") && !jsonString.ToString().Contains("}"))
+                    {
+                        result.Add(name, this.DeserializeObject<dynamic>(jsonString + ""));
+                    }
+                    else
+                    {
+                        result.Add(name, this.DeserializeObject<List<Dictionary<string, object>>>(jsonString + ""));
+
+                    }
+                }
+            }
+            else
+            {
+            }
         }
         #endregion
 
@@ -542,6 +557,30 @@ namespace SqlSugar
         #endregion
 
         #region DataTable
+        public DataTable DictionaryListToDataTable(List<Dictionary<string, object>> list) 
+        {
+            DataTable result = new DataTable();
+            if (list.Count == 0)
+                return result;
+
+            var columnNames = list.First();
+            foreach (var item in columnNames)
+            {
+                result.Columns.Add(item.Key,item.Value==null?typeof(object):item.Value.GetType());
+            }
+            foreach (var item in list)
+            {
+                var row = result.NewRow();
+                foreach (var key in item.Keys)
+                {
+                    row[key] = item[key];
+                }
+
+                result.Rows.Add(row);
+            }
+
+            return result;
+        }
         public dynamic DataTableToDynamic(DataTable table)
         {
             List<Dictionary<string, object>> deserializeObject = new List<Dictionary<string, object>>();
@@ -732,6 +771,7 @@ namespace SqlSugar
                         {
                             // ConditionalType = (ConditionalType)Convert.ToInt32(),
                             FieldName = item["FieldName"] + "",
+                            CSharpTypeName = item["CSharpTypeName"].ObjToString().IsNullOrEmpty() ? null: item["CSharpTypeName"].ObjToString(),
                             FieldValue = item["FieldValue"].Value<string>()==null?null: item["FieldValue"].ToString()
                         };
                         if (typeValue.IsInt())
@@ -770,6 +810,7 @@ namespace SqlSugar
                     {
                         ConditionalType = (ConditionalType)Convert.ToInt32(value["ConditionalType"].Value<int>()),
                         FieldName = value["FieldName"] + "",
+                        CSharpTypeName= value["CSharpTypeName"].ObjToString().IsNullOrEmpty()? null : value["CSharpTypeName"].ObjToString(),
                         FieldValue = value["FieldValue"].Value<string>() == null ? null : value["FieldValue"].ToString()
                     };
                 }

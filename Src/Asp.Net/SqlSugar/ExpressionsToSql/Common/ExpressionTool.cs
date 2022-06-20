@@ -53,6 +53,19 @@ namespace SqlSugar
             }
         }
 
+        public static List<ParameterExpression> ExpressionParameters(Expression expression)
+        {
+             List<ParameterExpression> parameters = null;
+             if (expression is LambdaExpression)
+             {
+                  if ((expression as LambdaExpression).Parameters != null) 
+                  {
+                      parameters = (expression as LambdaExpression).Parameters.ToList();
+                  }
+             }
+             return parameters;
+        }
+
         public static object GetValue(object value,ExpressionContext context)
         {
             if (value == null) return value;
@@ -183,6 +196,51 @@ namespace SqlSugar
             return reval;
         }
 
+        internal static Expression RemoveConvert(Expression item)
+        {
+            for (int i = 0; i < 10; i++)
+            {
+                if ((item is UnaryExpression) && (item as UnaryExpression).NodeType == ExpressionType.Convert)
+                {
+                    item = (item as UnaryExpression).Operand;
+                }
+                else 
+                {
+                    break;
+                }
+            }
+            return item;
+        }
+        internal static Expression RemoveConvertThanOne(Expression item)
+        {
+            for (int i = 0; i < 10; i++)
+            {
+                if ((item is UnaryExpression) 
+                    && (item as UnaryExpression).NodeType == ExpressionType.Convert
+                    && (item as UnaryExpression).Operand is UnaryExpression)
+                {
+                    item = (item as UnaryExpression).Operand;
+                }
+                else
+                {
+                    break;
+                }
+            }
+            return item;
+        }
+        public static string GetMemberName(Expression expression) 
+        {
+            if (expression is LambdaExpression) 
+            {
+                expression = (expression as LambdaExpression).Body;
+            }
+            if (expression is UnaryExpression) 
+            {
+                expression = ((UnaryExpression)expression).Operand;   
+            }
+            var member = (expression as MemberExpression).Member.Name;
+            return member;
+        }
         internal static object GetExpressionValue(Expression expression)
         {
             try

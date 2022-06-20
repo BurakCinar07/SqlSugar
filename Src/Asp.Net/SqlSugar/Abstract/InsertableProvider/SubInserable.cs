@@ -63,6 +63,10 @@ namespace SqlSugar
                     {
                         MemberAssignment memberAssignment = (MemberAssignment)memInit.Bindings[0];
                         tree.Expression = memberAssignment.Expression;
+                        if (memInit.Bindings.Count > 1)
+                        {
+                            tree.Childs = GetSubInsertTree(((MemberAssignment)memInit.Bindings[1]).Expression);
+                        }
                     }
                     resul.Add(tree);
                 }
@@ -206,7 +210,7 @@ namespace SqlSugar
                                 if (this.Context.CurrentConnectionConfig.DbType == DbType.PostgreSQL)
                                 {
                                     var sqlobj = this.Context.Insertable(insert).AS(tableName).ToSql();
-                                    id = this.Context.Ado.GetInt(sqlobj.Key+ "  "+ entityInfo.Columns.First(it=>isIdentity).DbColumnName, sqlobj.Value);
+                                    id = this.Context.Ado.GetInt(sqlobj.Key+ "  "+ this.InsertBuilder.Builder.GetTranslationColumnName(entityInfo.Columns.First(it=>isIdentity).DbColumnName), sqlobj.Value);
                                 }
                                 else
                                 {

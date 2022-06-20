@@ -24,6 +24,16 @@ namespace SqlSugar
         {
             return BulkCopyAsync(tableName,dt).ConfigureAwait(true).GetAwaiter().GetResult();
         }
+        public int BulkCopy(DataTable dt) 
+        {
+            Check.ExceptionEasy(this.AsName.IsNullOrEmpty(), "need .AS(tablaeName) ", "需要 .AS(tablaeName) 设置表名");
+            return BulkCopyAsync(this.AsName, dt).ConfigureAwait(true).GetAwaiter().GetResult();
+        }
+        public  Task<int> BulkCopyAsync(DataTable dt)
+        {
+            Check.ExceptionEasy(this.AsName.IsNullOrEmpty(), "need .AS(tablaeName) ", "需要 .AS(tablaeName) 设置表名");
+            return  BulkCopyAsync(this.AsName, dt);
+        }
         public async Task<int> BulkCopyAsync(string tableName, DataTable dt)
         {
             if (Size > 0)
@@ -99,6 +109,23 @@ namespace SqlSugar
         {
             return BulkUpdateAsync(tableName,dataTable, whereColumns, updateColumns).ConfigureAwait(true).GetAwaiter().GetResult();
         }
+        public int BulkUpdate(DataTable dataTable, string[] whereColumns, string[] updateColumns)
+        {
+            Check.ExceptionEasy(this.AsName.IsNullOrEmpty(), "need .AS(tablaeName) ", "需要 .AS(tablaeName) 设置表名");
+            return BulkUpdateAsync(this.AsName, dataTable, whereColumns, updateColumns).ConfigureAwait(true).GetAwaiter().GetResult();
+        }
+        public int BulkUpdate(DataTable dataTable, string[] whereColumns)
+        {
+            string[] updateColumns = dataTable.Columns.Cast<DataColumn>().Select(it => it.ColumnName).Where(it => !whereColumns.Any(z => z.EqualCase(it))).ToArray();
+            Check.ExceptionEasy(this.AsName.IsNullOrEmpty(), "need .AS(tablaeName) ", "需要 .AS(tablaeName) 设置表名");
+            return BulkUpdateAsync(this.AsName, dataTable, whereColumns, updateColumns).ConfigureAwait(true).GetAwaiter().GetResult();
+        }
+        public Task<int> BulkUpdateAsync(DataTable dataTable, string[] whereColumns)
+        {
+            string[] updateColumns = dataTable.Columns.Cast<DataColumn>().Select(it => it.ColumnName).Where(it => !whereColumns.Any(z => z.EqualCase(it))).ToArray();
+            Check.ExceptionEasy(this.AsName.IsNullOrEmpty(), "need .AS(tablaeName) ", "需要 .AS(tablaeName) 设置表名");
+            return BulkUpdateAsync(this.AsName, dataTable, whereColumns, updateColumns);
+        }
         public async Task<int> BulkUpdateAsync(string tableName, DataTable dataTable, string[] whereColumns, string[] updateColumns)
         {
 
@@ -128,6 +155,7 @@ namespace SqlSugar
             this.context.CurrentConnectionConfig.IsAutoCloseConnection = false;
             DataTable dt = ToDdateTable(datas);
             IFastBuilder buider = GetBuider();
+            ActionIgnoreColums(whereColumns, updateColumns, dt, buider.IsActionUpdateColumns);
             buider.Context = context;
             await buider.CreateTempAsync<T>(dt);
             await buider.ExecuteBulkCopyAsync(dt);
@@ -142,6 +170,38 @@ namespace SqlSugar
             End(datas, false);
             return result;
         }
+
+        private  void ActionIgnoreColums(string[] whereColumns, string[] updateColumns, DataTable dt,bool IsActionUpdateColumns)
+        {
+            if (entityInfo.Columns.Where(it => it.IsIgnore == false).Count() > whereColumns.Length + updateColumns.Length &&IsActionUpdateColumns)
+            {
+                var ignoreColums = dt.Columns.Cast<DataColumn>()
+                .Where(it => !whereColumns.Any(y => y.EqualCase(it.ColumnName)))
+                .Where(it => !updateColumns.Any(y => y.EqualCase(it.ColumnName))).ToList();
+                foreach (DataRow item in dt.Rows)
+                {
+                    foreach (var col in ignoreColums)
+                    {
+                        if (item[col.ColumnName].IsNullOrEmpty())
+                        {
+                            if (col.DataType == UtilConstants.StringType)
+                            {
+                                item[col.ColumnName] = string.Empty;
+                            }
+                            else if (col.DataType == UtilConstants.DateType)
+                            {
+                                item[col.ColumnName] =UtilMethods.GetMinDate(this.context.CurrentConnectionConfig);
+                            }
+                            else
+                            {
+                                item[col.ColumnName] = Activator.CreateInstance(col.DataType);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         private async Task<int> _BulkUpdate(string tableName,DataTable dataTable, string[] whereColumns, string[] updateColumns)
         {
             var datas = new string[dataTable.Rows.Count].ToList();
@@ -153,6 +213,10 @@ namespace SqlSugar
             dataTable.TableName = this.queryable.SqlBuilder.GetTranslationTableName(tableName);
             DataTable dt = GetCopyWriteDataTable(dataTable);
             IFastBuilder buider = GetBuider();
+            if (dt.Columns.Count != dataTable.Columns.Count)
+            {
+                ActionIgnoreColums(whereColumns, updateColumns, dt, buider.IsActionUpdateColumns);
+            }
             buider.Context = context;
             await buider.CreateTempAsync<object>(dt);
             await buider.ExecuteBulkCopyAsync(dt);

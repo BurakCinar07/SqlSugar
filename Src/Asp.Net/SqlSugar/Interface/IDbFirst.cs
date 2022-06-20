@@ -10,6 +10,7 @@ namespace SqlSugar
         IDbFirst SettingClassTemplate(Func<string, string> func);
         IDbFirst SettingClassDescriptionTemplate(Func<string, string> func);
         IDbFirst SettingPropertyTemplate(Func<string, string> func);
+        IDbFirst SettingPropertyTemplate(Func<DbColumnInfo, string,string,string> func);
         IDbFirst SettingPropertyDescriptionTemplate(Func<string, string> func);
         IDbFirst SettingConstructorTemplate(Func<string, string> func);
         IDbFirst SettingNamespaceTemplate(Func<string, string> func);
@@ -23,5 +24,7 @@ namespace SqlSugar
         void CreateClassFile(string directoryPath, string nameSpace = "Models");
         Dictionary<string, string> ToClassStringList(string nameSpace = "Models");
         void Init();
+        IDbFirst FormatFileName(Func<string,string> formatFileNameFunc);
+        IDbFirst StringNullable();
     }
 }

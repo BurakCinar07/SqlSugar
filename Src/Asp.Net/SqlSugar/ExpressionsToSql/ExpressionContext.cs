@@ -19,6 +19,7 @@ namespace SqlSugar
         #endregion
 
         #region Properties
+        public ExpressionOutParameter SugarContext { get; set; }
         public IDbMethods DbMehtods
         {
             get
@@ -133,6 +134,7 @@ namespace SqlSugar
             copyContext.IsSingle = this.IsSingle;
             copyContext.RootExpression = this.RootExpression;
             copyContext.TableEnumIsString = this.TableEnumIsString;
+            copyContext.SugarContext = this.SugarContext;
             return copyContext;
         }
         public ExpressionContext GetCopyContextWithMapping()

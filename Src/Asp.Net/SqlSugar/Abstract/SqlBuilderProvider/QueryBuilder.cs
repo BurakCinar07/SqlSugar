@@ -33,6 +33,11 @@ namespace SqlSugar
         #endregion
 
         #region Splicing basic
+        public string TranLock { get; set; }
+        public bool IsDisableMasterSlaveSeparation { get;  set; }
+        public bool IsEnableMasterSlaveSeparation { get; set; }
+        public bool IsQueryInQuery { get; set; }
+        public List<object> Includes { get; set; }
         public List<string> IgnoreColumns { get; set; }
         public bool IsCount { get; set; }
         public bool IsSqlQuery { get; set; }
@@ -241,6 +246,7 @@ namespace SqlSugar
             {
                 resolveExpress.PgSqlIsAutoToLower = true;
             }
+            resolveExpress.SugarContext = new ExpressionOutParameter() { Context = this.Context  };
             resolveExpress.RootExpression = expression;
             resolveExpress.JoinQueryInfos = Builder.QueryBuilder.JoinQueryInfos;
             resolveExpress.IsSingle = IsSingle()&& resolveType!= ResolveExpressType.WhereMultiple;
@@ -257,13 +263,13 @@ namespace SqlSugar
                 resolveExpress.SqlFuncServices = Context.CurrentConnectionConfig.ConfigureExternalServices == null ? null : Context.CurrentConnectionConfig.ConfigureExternalServices.SqlFuncServices;
             };
             resolveExpress.Resolve(expression, resolveType);
-            this.Parameters.AddRange(resolveExpress.Parameters.Select(it => new SugarParameter(it.ParameterName, it.Value)));
+            this.Parameters.AddRange(resolveExpress.Parameters.Select(it => new SugarParameter(it.ParameterName, it.Value,it.DbType)));
             var result = resolveExpress.Result;
             var isSingleTableHasSubquery = IsSingle() && resolveExpress.SingleTableNameSubqueryShortName.HasValue();
             if (isSingleTableHasSubquery)
             {
                 Check.Exception(!string.IsNullOrEmpty(this.TableShortName) && resolveExpress.SingleTableNameSubqueryShortName != this.TableShortName, "{0} and {1} need same name", resolveExpress.SingleTableNameSubqueryShortName, this.TableShortName);
-                this.TableShortName = resolveExpress.SingleTableNameSubqueryShortName;
+                this.TableShortName =resolveExpress.SingleTableNameSubqueryShortName;
             }
             return result;
         }
@@ -639,6 +645,18 @@ namespace SqlSugar
                 if (this.AsTables.Any(it=>it.Key==EntityName))
                 {
                     name = this.AsTables.FirstOrDefault(it => it.Key == EntityName).Value;
+                    if (this.IsQueryInQuery && this.SelectValue != null && this.SelectValue is Expression) 
+                    {
+                        if (this.SelectValue.ToString().Contains("Subqueryable()")&& name.TrimStart().StartsWith("(")) 
+                        {
+                            var oldName = name;
+                            name = Regex.Match(name, @"\(.+\)").Value;
+                            if (name.IsNullOrEmpty()) 
+                            {
+                                name = oldName;
+                            }
+                        }
+                    }
                 }
                 var result = Builder.GetTranslationTableName(name);
                 result += UtilConstants.Space;
@@ -652,13 +670,16 @@ namespace SqlSugar
                     result = result.Replace(" ) unionTable  ", ") "+TableShortName + UtilConstants.Space);
                     TableShortName = null;
                 }
-                if (this.TableShortName.HasValue())
+                if (this.TableShortName.HasValue()&&!IsSqlQuery)
                 {
                     result += (TableShortName + UtilConstants.Space);
                 }
                 if (this.TableWithString.HasValue() && this.TableWithString != SqlWith.Null)
                 {
-                    result += TableWithString + UtilConstants.Space;
+                    if (!result.TrimStart().StartsWith("("))
+                    {
+                        result += TableWithString + UtilConstants.Space;
+                    }
                 }
                 if (!this.IsSingle())
                 {

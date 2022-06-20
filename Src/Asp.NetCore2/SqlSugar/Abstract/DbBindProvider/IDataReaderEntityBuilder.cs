@@ -6,6 +6,7 @@ using System.Data;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 
 namespace SqlSugar
 {
@@ -41,6 +42,7 @@ namespace SqlSugar
         private static readonly MethodInfo getdatetimeoffset = typeof(IDataRecordExtensions).GetMethod("Getdatetimeoffset");
         private static readonly MethodInfo getdatetimeoffsetDate = typeof(IDataRecordExtensions).GetMethod("GetdatetimeoffsetDate");
         private static readonly MethodInfo getStringGuid = typeof(IDataRecordExtensions).GetMethod("GetStringGuid");
+        private static readonly MethodInfo getXelement = typeof(IDataRecordExtensions).GetMethod("GetXelement");
         private static readonly MethodInfo getConvertStringGuid = typeof(IDataRecordExtensions).GetMethod("GetConvertStringGuid");
         private static readonly MethodInfo getEnum = typeof(IDataRecordExtensions).GetMethod("GetEnum");
         private static readonly MethodInfo getConvertString = typeof(IDataRecordExtensions).GetMethod("GetConvertString");
@@ -182,6 +184,21 @@ namespace SqlSugar
                 generator.Emit(OpCodes.Callvirt, columnInfo.PropertyInfo.GetSetMethod(true));
                 generator.MarkLabel(endIfLabel);
             }
+            else if (columnInfo.UnderType == typeof(XElement)) 
+            {
+                int i = DataRecord.GetOrdinal(fieldName);
+                Label endIfLabel = generator.DefineLabel();
+                generator.Emit(OpCodes.Ldarg_0);
+                generator.Emit(OpCodes.Ldc_I4, i);
+                generator.Emit(OpCodes.Callvirt, isDBNullMethod);
+                generator.Emit(OpCodes.Brtrue, endIfLabel);
+                generator.Emit(OpCodes.Ldloc, result);
+                generator.Emit(OpCodes.Ldarg_0);
+                generator.Emit(OpCodes.Ldc_I4, i);
+                BindMethod(generator, columnInfo, i);
+                generator.Emit(OpCodes.Callvirt, columnInfo.PropertyInfo.GetSetMethod(true));
+                generator.MarkLabel(endIfLabel);
+            }
         }
         private void BindField(ILGenerator generator, LocalBuilder result, EntityColumnInfo columnInfo, string fieldName)
         {
@@ -229,7 +246,11 @@ namespace SqlSugar
                 {
                     method = isNullableType ? getConvertByte : getByte;
                 }
-                else if (bindPropertyType == UtilConstants.StringType&&dbTypeName?.ToLower()== "timestamp")
+                else if (bindPropertyType == UtilConstants.StringType && dbTypeName?.ToLower() == "timestamp")
+                {
+                    method = isNullableType ? getOtherNull.MakeGenericMethod(bindPropertyType) : getOther.MakeGenericMethod(bindPropertyType);
+                }
+                else if (dbTypeName.EqualCase("STRING")) 
                 {
                     method = isNullableType ? getOtherNull.MakeGenericMethod(bindPropertyType) : getOther.MakeGenericMethod(bindPropertyType);
                 }
@@ -261,7 +282,7 @@ namespace SqlSugar
                     if (bindProperyTypeName.IsContainsIn("int", "int32"))
                         method = isNullableType ? getConvertInt32 : getInt32;
                     if (bindProperyTypeName.IsContainsIn("int64"))
-                        method = isNullableType ? getConvertInt64 : getInt64;
+                        method = null;
                     if (bindProperyTypeName.IsContainsIn("byte"))
                         method = isNullableType ? getConvertByte : getByte;
                     if (bindProperyTypeName.IsContainsIn("int16"))
@@ -280,6 +301,10 @@ namespace SqlSugar
                     if (bindProperyTypeName == "guid")
                     {
                         method = isNullableType ? getConvertStringGuid : getStringGuid;
+                    }
+                    else if (bindProperyTypeName == "xelement") 
+                    {
+                        method =  getXelement;
                     }
                     break;
                 case CSharpDataType.DateTime:

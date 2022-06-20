@@ -23,6 +23,7 @@ namespace SqlSugar
         int Count(Expression<Func<T, bool>> whereExpression);
         bool Delete(Expression<Func<T, bool>> whereExpression);
         bool Delete(T deleteObj);
+        bool Delete(List<T> deleteObjs);
         bool DeleteById(dynamic id);
         bool DeleteByIds(dynamic[] ids);
         T GetById(dynamic id);
@@ -35,6 +36,8 @@ namespace SqlSugar
         T GetSingle(Expression<Func<T, bool>> whereExpression);
         T GetFirst(Expression<Func<T, bool>> whereExpression);
         bool Insert(T insertObj);
+        bool InsertOrUpdate(T data);
+        bool InsertOrUpdate(List<T> datas);
         bool InsertRange(List<T> insertObjs);
         bool InsertRange(T[] insertObjs);
         int InsertReturnIdentity(T insertObj);
@@ -55,6 +58,7 @@ namespace SqlSugar
         Task<int> CountAsync(Expression<Func<T, bool>> whereExpression);
         Task<bool> DeleteAsync(Expression<Func<T, bool>> whereExpression);
         Task<bool> DeleteAsync(T deleteObj);
+        Task<bool> DeleteAsync(List<T> deleteObjs);
         Task<bool> DeleteByIdAsync(dynamic id);
         Task<bool> DeleteByIdsAsync(dynamic[] ids);
         Task<T> GetByIdAsync(dynamic id);
@@ -67,6 +71,8 @@ namespace SqlSugar
         Task<T> GetSingleAsync(Expression<Func<T, bool>> whereExpression);
         Task<T> GetFirstAsync(Expression<Func<T, bool>> whereExpression);
         Task<bool> InsertAsync(T insertObj);
+        Task<bool> InsertOrUpdateAsync(T data);
+        Task<bool> InsertOrUpdateAsync(List<T> datas);
         Task<bool> InsertRangeAsync(List<T> insertObjs);
         Task<bool> InsertRangeAsync(T[] insertObjs);
         Task<int> InsertReturnIdentityAsync(T insertObj);

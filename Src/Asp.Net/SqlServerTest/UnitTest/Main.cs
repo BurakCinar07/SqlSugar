@@ -31,6 +31,22 @@ namespace OrmTest
         }
         public static void Init()
         {
+            UCustomNavigate01.Init();
+            UCustom023.Init();
+            UCustom22.Init();
+            UByteArray.Init();
+            UCustom021.Inti();
+            UCustom020.Init();
+            UCustom019.Init();
+            UnitManyToMany.Init();
+            UCustom018.Init();
+            UCustom017.Init();
+            UCustom016.Init();
+            UCustom015.Init();
+            UCustom014.Init();
+            UCustom013.Init();
+            UCustom012.Init();
+            UintDynamic.Init();
             UCustom09.Init();
             UCustom011.Init();
             UCustom010.Init();

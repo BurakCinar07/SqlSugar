@@ -33,9 +33,14 @@ namespace SqlSugar
             {
                 var sugarTable = (SugarTable)sugarAttributeInfo;
                 result.DbTableName = sugarTable.TableName;
-                result.TableDescription = sugarTable.TableDescription;
+                result.TableDescription = sugarTable.TableDescription.ToSqlFilter();
                 result.IsDisabledUpdateAll = sugarTable.IsDisabledUpdateAll;
                 result.IsDisabledDelete = sugarTable.IsDisabledDelete;
+            }
+            var indexs = type.GetCustomAttributes(typeof(SugarIndexAttribute));
+            if (indexs != null && indexs.Any())
+            {
+                result.Indexs = indexs.Select(it => it as SugarIndexAttribute).ToList();
             }
             if (result.TableDescription.IsNullOrEmpty()) result.TableDescription = GetTableAnnotation(type);
             if (this.Context.CurrentConnectionConfig.ConfigureExternalServices != null && this.Context.CurrentConnectionConfig.ConfigureExternalServices.EntityNameService != null)
@@ -156,7 +161,7 @@ namespace SqlSugar
             {
                 return string.Empty;
             }
-            XElement xe = XElement.Load(xmlPath);
+            XElement xe =new ReflectionInoCacheService().GetOrCreate("EntityXml_"+xmlPath,()=> XElement.Load(xmlPath));
             if (xe == null)
             {
                 return string.Empty;
@@ -166,7 +171,19 @@ namespace SqlSugar
             {
                 return string.Empty;
             }
-            return xeNode.Element("summary").Value.ToSqlFilter().Trim();
+            var summary = xeNode.Element("summary");
+            if (summary != null)
+            {
+                return summary.Value.ToSqlFilter().Trim();
+            }
+            else 
+            {
+                var summaryValue = xeNode.Elements().Where(x => x.Name.ToString().EqualCase("summary")).Select(it => it.Value).FirstOrDefault();
+                if(summaryValue==null)
+                    return string.Empty;  
+                else
+                    return summaryValue.ToSqlFilter().Trim()??"";
+            }
         }
         /// <summary>
         /// Gets the code annotation for the database table
@@ -220,6 +237,12 @@ namespace SqlSugar
                 EntityColumnInfo column = new EntityColumnInfo();
                 //var isVirtual = property.GetGetMethod().IsVirtual;
                 //if (isVirtual) continue;
+                var navigat=property.GetCustomAttribute(typeof(Navigate));
+                if (navigat != null) 
+                {
+                    column.IsIgnore = true;
+                    column.Navigat = navigat as Navigate;
+                }
                 var sugarColumn = property.GetCustomAttributes(typeof(SugarColumn), true)
                 .Where(it => it is SugarColumn)
                 .Select(it => (SugarColumn)it)
@@ -251,7 +274,7 @@ namespace SqlSugar
                         column.DbColumnName = sugarColumn.ColumnName.IsNullOrEmpty() ? property.Name : sugarColumn.ColumnName;
                         column.IsPrimarykey = sugarColumn.IsPrimaryKey;
                         column.IsIdentity = sugarColumn.IsIdentity;
-                        column.ColumnDescription = sugarColumn.ColumnDescription;
+                        column.ColumnDescription = sugarColumn.ColumnDescription.ToSqlFilter();
                         column.IsNullable = sugarColumn.IsNullable;
                         column.Length = sugarColumn.Length;
                         column.OldDbColumnName = sugarColumn.OldColumnName;
@@ -269,6 +292,8 @@ namespace SqlSugar
                         column.UIndexGroupNameList = sugarColumn.UniqueGroupNameList;
                         column.IsOnlyIgnoreUpdate = sugarColumn.IsOnlyIgnoreUpdate;
                         column.IsArray = sugarColumn.IsArray;
+                        column.IsTreeKey = sugarColumn.IsTreeKey;
+                        column.SqlParameterDbType = sugarColumn.SqlParameterDbType;
                     }
                     else
                     {
