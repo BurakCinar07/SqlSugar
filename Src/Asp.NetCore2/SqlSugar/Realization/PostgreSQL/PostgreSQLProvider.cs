@@ -113,6 +113,26 @@ namespace SqlSugar
                     {
                         sqlParameter.NpgsqlDbType = ArrayMapping[type] | NpgsqlDbType.Array;
                     }
+                    else if (type==DBNull.Value.GetType()) 
+                    {
+                        if (parameter.DbType.IsIn(System.Data.DbType.Int32))
+                        {
+                            sqlParameter.NpgsqlDbType = NpgsqlDbType.Integer | NpgsqlDbType.Array;
+                        }
+                        else if (parameter.DbType.IsIn(System.Data.DbType.Int16))
+                        {
+                            sqlParameter.NpgsqlDbType = NpgsqlDbType.Smallint | NpgsqlDbType.Array;
+                        }
+                        else if (parameter.DbType.IsIn(System.Data.DbType.Int64))
+                        {
+                            sqlParameter.NpgsqlDbType = NpgsqlDbType.Bigint | NpgsqlDbType.Array;
+                        }
+                        else 
+                        {
+                            sqlParameter.NpgsqlDbType =NpgsqlDbType.Text | NpgsqlDbType.Array;
+                        }
+
+                    }
                     else
                     {
                         Check.Exception(true, sqlParameter.Value.GetType().Name + " No Support");

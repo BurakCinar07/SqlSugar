@@ -158,10 +158,30 @@ namespace SqlSugar
         {
             return ScopedContext.GetConnection(configId);
         }
-
+        public SqlSugarScopeProvider GetConnectionScope(dynamic configId)
+        {
+            return ScopedContext.GetConnectionScope(configId);
+        }
+        public SqlSugarProvider GetConnectionWithAttr<T>()
+        {
+            return ScopedContext.GetConnectionWithAttr<T>();
+        }
+        public SqlSugarScopeProvider GetConnectionScopeWithAttr<T>()
+        {
+            return ScopedContext.GetConnectionScopeWithAttr<T>();
+        }
         public DateTime GetDate()
         {
             return ScopedContext.GetDate();
+        }
+
+        public T CreateContext<T>(bool isTran = true) where T : SugarUnitOfWork, new() 
+        {
+            return ScopedContext.CreateContext<T>(isTran);
+        }
+        public SugarUnitOfWork CreateContext(bool isTran = true) 
+        {
+            return ScopedContext.CreateContext(isTran);
         }
 
         public SimpleClient<T> GetSimpleClient<T>() where T : class, new()
@@ -208,7 +228,14 @@ namespace SqlSugar
         {
             ScopedContext.Open();
         }
-
+        public ISugarQueryable<T> SlaveQueryable<T>() 
+        {
+            return ScopedContext.SlaveQueryable<T>();
+        }
+        public ISugarQueryable<T> MasterQueryable<T>() 
+        {
+            return ScopedContext.MasterQueryable<T>();
+        }
         public ISugarQueryable<ExpandoObject> Queryable(string tableName, string shortName)
         {
             return ScopedContext.Queryable(tableName,shortName);
@@ -400,7 +427,14 @@ namespace SqlSugar
         {
             return ScopedContext.Queryable(joinQueryable1, joinQueryable2, joinQueryable3,joinType1,joinExpression1,joinType2,joinExpression2);
         }
-
+        public ISugarQueryable<T, T2, T3,T4> Queryable<T, T2, T3, T4>(ISugarQueryable<T> joinQueryable1, ISugarQueryable<T2> joinQueryable2, ISugarQueryable<T3> joinQueryable3, ISugarQueryable<T4> joinQueryable4, JoinType joinType1, Expression<Func<T, T2, T3, T4, bool>> joinExpression1, JoinType joinType2, Expression<Func<T, T2, T3, T4, bool>> joinExpression2, JoinType joinType3, Expression<Func<T, T2, T3, T4, bool>> joinExpression3)
+            where T : class, new()
+            where T2 : class, new()
+            where T3 : class, new()
+             where T4 : class, new()
+        {
+            return ScopedContext.Queryable(joinQueryable1, joinQueryable2, joinQueryable3, joinQueryable4, joinType1, joinExpression1, joinType2, joinExpression2, joinType3, joinExpression3);
+        }
         public ISugarQueryable<T> Queryable<T>()
         {
             return ScopedContext.Queryable<T>();
@@ -650,6 +684,44 @@ namespace SqlSugar
         public IFastest<T> Fastest<T>() where T : class, new()
         {
             return ScopedContext.Fastest<T>();
+        }
+
+        public void ThenMapper<T>(IEnumerable<T> list, Action<T> action)
+        {
+            ScopedContext.ThenMapper(list, action);
+        }
+
+        public Task ThenMapperAsync<T>(IEnumerable<T> list, Func<T, Task> action)
+        {
+            return ScopedContext.ThenMapperAsync(list, action);
+        }
+        public ISugarQueryable<T> QueryableWithAttr<T>()
+        {
+            return ScopedContext.QueryableWithAttr<T>();
+        }
+        public IInsertable<T> InsertableWithAttr<T>(T insertObj) where T : class, new()
+        {
+            return ScopedContext.InsertableWithAttr<T>(insertObj);
+        }
+        public IInsertable<T> InsertableWithAttr<T>(List<T> insertObjs) where T : class, new()
+        {
+            return ScopedContext.InsertableWithAttr<T>(insertObjs);
+        }
+        public IUpdateable<T> UpdateableWithAttr<T>(T updateObj) where T : class, new()
+        {
+            return ScopedContext.UpdateableWithAttr<T>(updateObj);
+        }
+        public IUpdateable<T> UpdateableWithAttr<T>(List<T> updateObjs) where T : class, new()
+        {
+            return ScopedContext.UpdateableWithAttr<T>(updateObjs);
+        }
+        public IDeleteable<T> DeleteableWithAttr<T>(T deleteObj) where T : class, new()
+        {
+            return ScopedContext.DeleteableWithAttr<T>(deleteObj);
+        }
+        public IDeleteable<T> DeleteableWithAttr<T>(List<T> deleteObjs) where T : class, new()
+        {
+            return ScopedContext.DeleteableWithAttr<T>(deleteObjs);
         }
     }
 }

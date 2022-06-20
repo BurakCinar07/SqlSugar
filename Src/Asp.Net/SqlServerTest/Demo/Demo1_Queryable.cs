@@ -24,75 +24,7 @@ namespace OrmTest
             ConfiQuery();
         }
 
-        private static void ConfiQuery()
-        {
-            var db = GetInstance();
-            List<DataDictionary> datas = new List<DataDictionary>();
-            datas.Add(new DataDictionary() { Code="1", Name="男",Type="sex" });
-            datas.Add(new DataDictionary() { Code = "2", Name = "女", Type = "sex" });
-            datas.Add(new DataDictionary() { Code = "1", Name = "南通市", Type = "city" });
-            datas.Add(new DataDictionary() { Code = "2", Name = "苏州市", Type = "city" });
-            datas.Add(new DataDictionary() { Code = "1", Name = "江苏省", Type = "province" });
-            datas.Add(new DataDictionary() { Code = "2", Name = "湖南省", Type = "province" });
-            db.CodeFirst.InitTables<DataDictionary>();
-            db.CodeFirst.InitTables<Person>();
-            db.DbMaintenance.TruncateTable<DataDictionary>();
-            db.Insertable(datas).ExecuteCommand();
 
-            if (!db.ConfigQuery.Any()) 
-            {
-                var types= db.Queryable<DataDictionary>().Select(it => it.Type).Distinct().ToList();
-                foreach (var type in types)
-                {
-                    db.ConfigQuery.SetTable<DataDictionary>(it => it.Code, it => it.Name, type, it => it.Type == type);
-                }
-
-                db.ConfigQuery.SetTable<Order>(it => it.Id, it => it.Name, "01", it => it.Id > 1);
-                db.ConfigQuery.SetTable<Order>(it => it.Id, it => it.Name, "02", it => it.Id > 2);
-                db.ConfigQuery.SetTable<Order>(it => it.Id, it => it.Name, null);
-            }
-
-
-            var res=db.Queryable<Person>().Select(it => new Person()
-            {
-                 Id=it.Id.SelectAll(),
-                 SexName=it.SexId.GetConfigValue<DataDictionary>("sex"),
-                 ProviceName = it.SexId.GetConfigValue<DataDictionary>("province"),
-                 CityName = it.SexId.GetConfigValue<DataDictionary>("city"),
-            }).ToList();//也支持支持写在Where或者Orderby
- 
-            var list = db.Queryable<OrderItem>().Select(it => new OrderItem
-            {
-                ItemId = it.ItemId.SelectAll(),
-                OrderName = it.OrderId.GetConfigValue<Order>("01")
-            }).ToList();
-            var list2 = db.Queryable<OrderItem>().Select(it => new OrderItem
-            {
-                ItemId = it.ItemId.SelectAll(),
-                OrderName = it.OrderId.GetConfigValue<Order>("02")
-            }).ToList();
-            var list3 = db.Queryable<OrderItem>().Select(it => new OrderItem
-            {
-                ItemId = it.ItemId.SelectAll(),
-                OrderName = it.OrderId.GetConfigValue<Order>()
-            }).ToList();
-
-            var list4 = db.Queryable<OrderItem>().Select(it => new OrderItem
-            {
-                ItemId = it.ItemId.SelectAll(),
-                OrderName = it.OrderId.GetConfigValue<Order>()
-            })
-            .Where(it=>it.OrderId.GetConfigValue<Order>()== "order1")
-            .OrderBy(it=>it.OrderId.GetConfigValue<Order>()).ToList();
-
-            var list5 = db.Queryable<Order, OrderItem>((o, i) => o.Id == i.OrderId)
-                        .OrderBy((o,i)=>i.OrderId.GetConfigValue<Order>(),OrderByType.Desc)
-                        .Select<ViewOrder>((o,i)=>new ViewOrder() { 
-                           Id= o.Id.SelectAll(),
-                           Name=i.OrderId.GetConfigValue<Order>()
-                        })
-                        .ToList();
-        }
 
         private static void EasyExamples()
         {
@@ -100,6 +32,7 @@ namespace OrmTest
             Console.WriteLine("#### Examples Start ####");
             var db = GetInstance();
             var dbTime = db.GetDate();
+            var getFirst = db.Queryable<Order>().OrderBy(x => Convert.ToInt32(x.Price), OrderByType.Asc).First();
             var getAll = db.Queryable<Order>().Where(it=> SqlFunc.EqualsNull(it.Name,null)).ToList();
             var getOrderBy = db.Queryable<Order>().OrderBy(it => it.Name,OrderByType.Desc).ToList();
             var getOrderBy2 = db.Queryable<Order>().OrderBy(it => it.Id).OrderBy(it => it.Name, OrderByType.Desc).ToList();
@@ -207,6 +140,26 @@ namespace OrmTest
             };
             var five=db.Ado.ExecuteCommand("11111");
             db.CurrentConnectionConfig.SqlMiddle = null;
+            db.GetConnectionWithAttr<Order>().Queryable<Order>().ToList();
+            var test34 = db.Queryable<Order>().OrderBy(it=>new { 
+              id= it.Id,
+              name=SqlFunc.Asc(it.Name),
+            }).ToList();
+            var dr = new Dictionary<string, object>();
+            dr.Add("Id", 1);
+            dr.Add("Name", "2");
+            var dr2 = new Dictionary<string, object>();
+            dr2.Add("Id", 2);
+            dr2.Add("Name", "2");
+            var test35 = db.Queryable<object>().AS("[order]").WhereColumns(new List<Dictionary<string, object>>() { dr, dr2 }).ToDataTable();
+            var test36 = db.Queryable<Order>().Take(1).ToList();
+            var test37= db.Queryable<Order>().First();
+            var test38 = db.Queryable<Order>().Take(2).ToList();
+            var test39 = db.Queryable<Order>().Take(1).OrderBy(it => it.Id).ToList();
+            var test40 = db.Queryable<Order>().OrderBy(it => it.Id).First();
+            var test41 = db.Queryable<Order>().Take(2).OrderBy(it => it.Id).ToList();
+            var test42 = db.Queryable<Order>().Take(2).OrderBy(it => it.Id).ToPageList(1,2);
+            var test43 = db.Queryable<Order>().Take(2).ToPageList(1, 2);
             Console.WriteLine("#### Examples End ####");
         }
 
@@ -369,13 +322,18 @@ namespace OrmTest
 
 
             db.Insertable(new Tree() { Id = 222, Name = "child11", ParentId = 11 }).ExecuteCommand();
-            var tree = db.Queryable<Tree>().ToTree(it => it.Child, it => it.ParentId, 0); 
+            var tree = db.Queryable<Tree>().ToTree(it => it.Child, it => it.ParentId, 0);
+            var tree2 = db.Queryable<Tree2>().ToTree(it => it.Child, it => it.ParentId, 0);
             var allchilds= db.Queryable<Tree>().ToChildList(it => it.ParentId, 0);
+            var allchilds_2 = db.Queryable<Tree2>().ToChildList(it => it.ParentId, 0);
             var allchilds1 = db.Queryable<Tree>().ToChildList(it => it.ParentId, 1);
             var allchilds2= db.Queryable<Tree>().ToChildList(it => it.ParentId, 2);
+            var allchilds2_2 = db.Queryable<Tree2>().ToChildList(it => it.ParentId, 2);
             var parentList = db.Queryable<Tree>().ToParentList(it => it.ParentId, 22);
             var parentList2 = db.Queryable<Tree>().ToParentList(it => it.ParentId, 222);
+            var parentList22 = db.Queryable<Tree2>().ToParentList(it => it.ParentId, 222);
             var parentList3 = db.Queryable<Tree>().ToParentList(it => it.ParentId, 2);
+       
 
             //one to one
             var list2 = db.Queryable<OrderItemInfo>().Mapper(it => it.Order, it => it.OrderId).ToList();
@@ -403,7 +361,25 @@ namespace OrmTest
                 });
                 itemModel.Items = allItems.Where(it => it.OrderId==itemModel.Id).ToList();//Every time it's executed
             }).ToList();
-
+            db.CodeFirst.InitTables<Tree>();
+            //无限级高性能导航映射
+            var treeRoot=db.Queryable<Tree>().Where(it => it.Id == 1).ToList();
+            db.ThenMapper(treeRoot, item =>
+            {
+                item.Child = db.Queryable<Tree>().SetContext(x => x.ParentId, () => item.Id, item).ToList();
+            });
+            db.ThenMapper(treeRoot.SelectMany(it=>it.Child), it =>
+            {
+                it.Child = db.Queryable<Tree>().SetContext(x => x.ParentId, () => it.Id, it).ToList();
+            });
+            db.ThenMapper(treeRoot.SelectMany(it => it.Child).SelectMany(it=>it.Child), it =>
+            {
+                it.Child = db.Queryable<Tree>().SetContext(x => x.ParentId, () => it.Id, it).ToList();
+            });
+            db.ThenMapper(treeRoot.SelectMany(it => it.Child).SelectMany(it => it.Child).SelectMany(it => it.Child), it =>
+            {
+                it.Child = db.Queryable<Tree>().SetContext(x => x.ParentId, () => it.Id, it).ToList();
+            });
             Console.WriteLine("#### End Start ####");
         }
 
@@ -582,6 +558,77 @@ namespace OrmTest
             Console.WriteLine("#### Async End ####");
         }
 
+
+        private static void ConfiQuery()
+        {
+            var db = GetInstance();
+            List<DataDictionary> datas = new List<DataDictionary>();
+            datas.Add(new DataDictionary() { Code = "1", Name = "男", Type = "sex" });
+            datas.Add(new DataDictionary() { Code = "2", Name = "女", Type = "sex" });
+            datas.Add(new DataDictionary() { Code = "1", Name = "南通市", Type = "city" });
+            datas.Add(new DataDictionary() { Code = "2", Name = "苏州市", Type = "city" });
+            datas.Add(new DataDictionary() { Code = "1", Name = "江苏省", Type = "province" });
+            datas.Add(new DataDictionary() { Code = "2", Name = "湖南省", Type = "province" });
+            db.CodeFirst.InitTables<DataDictionary>();
+            db.CodeFirst.InitTables<Person>();
+            db.DbMaintenance.TruncateTable<DataDictionary>();
+            db.Insertable(datas).ExecuteCommand();
+
+            if (!db.ConfigQuery.Any())
+            {
+                var types = db.Queryable<DataDictionary>().Select(it => it.Type).Distinct().ToList();
+                foreach (var type in types)
+                {
+                    db.ConfigQuery.SetTable<DataDictionary>(it => it.Code, it => it.Name, type, it => it.Type == type);
+                }
+
+                db.ConfigQuery.SetTable<Order>(it => it.Id, it => it.Name, "01", it => it.Id > 1);
+                db.ConfigQuery.SetTable<Order>(it => it.Id, it => it.Name, "02", it => it.Id > 2);
+                db.ConfigQuery.SetTable<Order>(it => it.Id, it => it.Name, null);
+            }
+
+
+            var res = db.Queryable<Person>().Select(it => new Person()
+            {
+                Id = it.Id.SelectAll(),
+                SexName = it.SexId.GetConfigValue<DataDictionary>("sex"),
+                ProviceName = it.SexId.GetConfigValue<DataDictionary>("province"),
+                CityName = it.SexId.GetConfigValue<DataDictionary>("city"),
+            }).ToList();//也支持支持写在Where或者Orderby
+
+            var list = db.Queryable<OrderItem>().Select(it => new OrderItem
+            {
+                ItemId = it.ItemId.SelectAll(),
+                OrderName = it.OrderId.GetConfigValue<Order>("01")
+            }).ToList();
+            var list2 = db.Queryable<OrderItem>().Select(it => new OrderItem
+            {
+                ItemId = it.ItemId.SelectAll(),
+                OrderName = it.OrderId.GetConfigValue<Order>("02")
+            }).ToList();
+            var list3 = db.Queryable<OrderItem>().Select(it => new OrderItem
+            {
+                ItemId = it.ItemId.SelectAll(),
+                OrderName = it.OrderId.GetConfigValue<Order>()
+            }).ToList();
+
+            var list4 = db.Queryable<OrderItem>().Select(it => new OrderItem
+            {
+                ItemId = it.ItemId.SelectAll(),
+                OrderName = it.OrderId.GetConfigValue<Order>()
+            })
+            .Where(it => it.OrderId.GetConfigValue<Order>() == "order1")
+            .OrderBy(it => it.OrderId.GetConfigValue<Order>()).ToList();
+
+            var list5 = db.Queryable<Order, OrderItem>((o, i) => o.Id == i.OrderId)
+                        .OrderBy((o, i) => i.OrderId.GetConfigValue<Order>(), OrderByType.Desc)
+                        .Select<ViewOrder>((o, i) => new ViewOrder()
+                        {
+                            Id = o.Id.SelectAll(),
+                            Name = i.OrderId.GetConfigValue<Order>()
+                        })
+                        .ToList();
+        }
         private static SqlSugarClient GetInstance()
         {
             return new SqlSugarClient(new ConnectionConfig()

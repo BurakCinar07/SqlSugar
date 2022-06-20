@@ -17,10 +17,14 @@ namespace SqlSugar
             {
                 sql = sql.Replace("+@", "+:");
                 if (sql.HasValue()&&sql.Contains("@")) {
-                    var exceptionalCaseInfo = Regex.Matches(sql, @"\'[^\=]*?\@.*?\'| [\.,\w]+\@[\.,\w]+ | [\.,\w]+\@[\.,\w]+|[\.,\w]+\@[\.,\w]+ ");
+                    var exceptionalCaseInfo = Regex.Matches(sql, @"\'[^\=]*?\@.*?\'|[\.,\w]+\@[\.,\w]+ | [\.,\w]+\@[\.,\w]+|[\.,\w]+\@[\.,\w]+ |\d+\@\d|\@\@");
                     if (exceptionalCaseInfo != null) {
                         foreach (var item in exceptionalCaseInfo.Cast<Match>())
                         {
+                            if (item.Value != null && item.Value.IndexOf(",") == 1&&Regex.IsMatch(item.Value, @"^ \,\@\w+$")) 
+                            {
+                                break;
+                            }
                             sql = sql.Replace(item.Value, item.Value.Replace("@", UtilConstants.ReplaceKey));
                         }
                     }
@@ -83,6 +87,7 @@ namespace SqlSugar
         }
         public override DbCommand GetCommand(string sql, SugarParameter[] parameters)
         {
+            sql = ReplaceKeyWordParameterName(sql, parameters);
             OracleCommand sqlCommand = new OracleCommand(sql, (OracleConnection)this.Connection);
             sqlCommand.BindByName = true;
             sqlCommand.CommandType = this.CommandType;
@@ -100,6 +105,32 @@ namespace SqlSugar
             CheckConnection();
             return sqlCommand;
         }
+
+        private static string ReplaceKeyWordParameterName(string sql, SugarParameter[] parameters)
+        {
+            if (parameters.HasValue())
+            {
+                foreach (var Parameter in parameters)
+                {
+                    if (Parameter.ParameterName != null && Parameter.ParameterName.ToLower().IsIn("@user", "@level",  ":user", ":level"))
+                    {
+                        if (parameters.Count(it => it.ParameterName.StartsWith(Parameter.ParameterName)) == 1)
+                        {
+                            var newName = Parameter.ParameterName + "_01";
+                            sql = sql.Replace(Parameter.ParameterName, newName);
+                            Parameter.ParameterName = newName;
+                        }
+                        else
+                        {
+                            Check.ExceptionEasy($" {Parameter.ParameterName} is key word", $"{Parameter.ParameterName}ÊÇ¹Ø¼ü´Ê");
+                        }
+                    }
+                }
+            }
+
+            return sql;
+        }
+
         public override void SetCommandToAdapter(IDataAdapter dataAdapter, DbCommand command)
         {
             ((MyOracleDataAdapter)dataAdapter).SelectCommand = (OracleCommand)command;
@@ -139,7 +170,7 @@ namespace SqlSugar
                     sqlParameter.OracleDbType = OracleDbType.Clob;
                     sqlParameter.Value = parameter.Value;
                 }
-                if (parameter.IsArray) 
+                if (parameter.IsArray)
                 {
                     sqlParameter.OracleDbType = OracleDbType.Varchar2;
                     sqlParameter.CollectionType = OracleCollectionType.PLSQLAssociativeArray;
@@ -171,6 +202,11 @@ namespace SqlSugar
                 {
                     sqlParameter.Value = parameter.Value;
                     sqlParameter.DbType = System.Data.DbType.DateTime;
+                }
+                else if (parameter.DbType == System.Data.DbType.Date)
+                {
+                    sqlParameter.Value = parameter.Value;
+                    sqlParameter.DbType = System.Data.DbType.Date;
                 }
                 else if (parameter.DbType == System.Data.DbType.AnsiStringFixedLength)
                 {

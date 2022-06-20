@@ -22,6 +22,7 @@ namespace SqlSugar
         public DiffLogModel diffModel { get; set; }
         public List<string> tempPrimaryKeys { get; set; }
         internal Action RemoveCacheFunc { get; set; }
+        internal List<T> DeleteObjects { get; set; }
         public EntityInfo EntityInfo
         {
             get
@@ -87,6 +88,7 @@ namespace SqlSugar
 
         public IDeleteable<T> Where(List<T> deleteObjs)
         {
+            this.DeleteObjects = deleteObjs;
             if (deleteObjs == null || deleteObjs.Count() == 0)
             {
                 Where(SqlBuilder.SqlFalse);
@@ -143,7 +145,7 @@ namespace SqlSugar
                         var tempequals = DeleteBuilder.WhereInEqualTemplate;
                         if (this.Context.CurrentConnectionConfig.MoreSettings != null && this.Context.CurrentConnectionConfig.MoreSettings.DisableNvarchar == true) 
                         {
-                            tempequals = "\"{0}\"='{1}' ";
+                            tempequals = $"{SqlBuilder.SqlTranslationLeft}{{0}}{SqlBuilder.SqlTranslationRight}='{{1}}' ";
                         }
                         if (this.Context.CurrentConnectionConfig.DbType == DbType.Oracle)
                         {
@@ -182,8 +184,12 @@ namespace SqlSugar
         {
             var expResult = DeleteBuilder.GetExpressionValue(expression, ResolveExpressType.WhereSingle);
             var whereString = expResult.GetResultString();
-            if (expression.ToString().Contains("Subqueryable()")){
-                whereString = whereString.Replace(this.SqlBuilder.GetTranslationColumnName(expression.Parameters.First().Name) + ".",this.SqlBuilder.GetTranslationTableName(this.EntityInfo.DbTableName) + ".");
+            if (expression.ToString().Contains("Subqueryable()")) {
+                whereString = whereString.Replace(this.SqlBuilder.GetTranslationColumnName(expression.Parameters.First().Name) + ".", this.SqlBuilder.GetTranslationTableName(this.EntityInfo.DbTableName) + ".");
+            } 
+            else if (expResult.IsNavicate)
+            {
+                whereString = whereString.Replace(expression.Parameters.First().Name + ".", this.SqlBuilder.GetTranslationTableName(this.EntityInfo.DbTableName) + ".");
             }
             DeleteBuilder.WhereInfos.Add(whereString);
             return this;
@@ -252,15 +258,44 @@ namespace SqlSugar
             return result;
         }
 
-        public IDeleteable<T> WhereColumns(Expression<Func<T, object>> columns)
+        public IDeleteable<T> WhereColumns(List<T> list,Expression<Func<T, object>> columns)
         {
-            if (columns != null)
+            if (this.GetPrimaryKeys().IsNullOrEmpty())
+            {
+                tempPrimaryKeys = DeleteBuilder.GetExpressionValue(columns, ResolveExpressType.ArraySingle).GetResultArray().Select(it => this.SqlBuilder.GetNoTranslationColumnName(it)).ToList();
+            }
+            this.Where(list);
+            if (columns != null&& tempPrimaryKeys.IsNullOrEmpty())
             {
                 tempPrimaryKeys = DeleteBuilder.GetExpressionValue(columns, ResolveExpressType.ArraySingle).GetResultArray().Select(it => this.SqlBuilder.GetNoTranslationColumnName(it)).ToList();
             }
             return this;
         }
-
+        public IDeleteable<T> WhereColumns(List<Dictionary<string, object>> list) 
+        {
+            List<IConditionalModel> conditionalModels = new List<IConditionalModel>();
+            foreach (var model in list)
+            {
+                int i = 0;
+                var clist = new List<KeyValuePair<WhereType, ConditionalModel>>();
+                foreach (var item in model.Keys)
+                {
+                    clist.Add(new KeyValuePair<WhereType, ConditionalModel>(i == 0 ? WhereType.Or : WhereType.And, new ConditionalModel()
+                    {
+                        FieldName =item,
+                        ConditionalType = ConditionalType.Equal,
+                        FieldValue = model[item].ObjToString(),
+                        CSharpTypeName = model[item]==null?null : model[item].GetType().Name
+                    }));
+                    i++;
+                }
+                conditionalModels.Add(new ConditionalCollections()
+                {
+                    ConditionalList = clist
+                });
+            }
+            return this.Where(conditionalModels);
+        }
         public IDeleteable<T> RemoveDataCache()
         {
             this.RemoveCacheFunc = () =>
@@ -275,7 +310,11 @@ namespace SqlSugar
             var queryable = this.Context.Queryable<T>();
             queryable.QueryBuilder.LambdaExpressions.ParameterIndex= 1000;
             var sqlable= queryable.ToSql();
-            this.Where(Regex.Split(sqlable.Key," Where ",RegexOptions.IgnoreCase).Last(), sqlable.Value);
+            var whereInfos = Regex.Split(sqlable.Key, " Where ", RegexOptions.IgnoreCase);
+            if (whereInfos.Length > 1)
+            {
+                this.Where(whereInfos.Last(), sqlable.Value);
+            }
             return this;
         }
         public SplitTableDeleteProvider<T> SplitTable(Func<List<SplitTableInfo>, IEnumerable<SplitTableInfo>> getTableNamesFunc) 
@@ -289,6 +328,19 @@ namespace SqlSugar
             };
             var tables = getTableNamesFunc(helper.GetTables());
             result.Tables = tables;
+            result.deleteobj = this;
+            return result;
+        }
+        public SplitTableDeleteByObjectProvider<T> SplitTable()
+        {
+            SplitTableDeleteByObjectProvider<T> result = new SplitTableDeleteByObjectProvider<T>();
+            result.Context = this.Context;
+            Check.ExceptionEasy(this.DeleteObjects == null, "SplitTable() +0  only List<T> can be deleted", "SplitTable()无参数重载只支持根据实体集合删除");
+            result.deleteObjects = this.DeleteObjects.ToArray();
+            SplitTableContext helper = new SplitTableContext((SqlSugarProvider)Context)
+            {
+                EntityInfo = this.EntityInfo
+            };
             result.deleteobj = this;
             return result;
         }
@@ -394,7 +446,14 @@ namespace SqlSugar
                 DeleteBuilder.TableWithString = lockString;
             return this;
         }
-
+        public virtual string ToSqlString()
+        {
+            var sqlObj = this.ToSql();
+            var result = sqlObj.Key;
+            if (result == null) return null;
+            result = UtilMethods.GetSqlString(this.Context.CurrentConnectionConfig, sqlObj);
+            return result;
+        }
         public KeyValuePair<string, List<SugarParameter>> ToSql()
         {
             DeleteBuilder.EntityInfo = this.Context.EntityMaintenance.GetEntityInfo<T>();
@@ -509,7 +568,7 @@ namespace SqlSugar
         {
             List<DiffLogTableInfo> result = new List<DiffLogTableInfo>();
             var whereSql = Regex.Replace(sql, ".* WHERE ", "", RegexOptions.Singleline);
-            var dt = this.Context.Queryable<T>().Where(whereSql).AddParameters(parameters).ToDataTable();
+            var dt = this.Context.Queryable<T>().Filter(null, true).Where(whereSql).AddParameters(parameters).ToDataTable();
             if (dt.Rows != null && dt.Rows.Count > 0)
             {
                 foreach (DataRow row in dt.Rows)

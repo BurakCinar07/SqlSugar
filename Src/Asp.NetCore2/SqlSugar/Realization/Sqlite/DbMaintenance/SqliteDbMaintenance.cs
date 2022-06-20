@@ -84,7 +84,7 @@ namespace SqlSugar
         {
             get
             {
-                return "CREATE TABLE {0}(\r\n{1} )";
+                return "CREATE TABLE {0}(\r\n{1} $PrimaryKey )";
             }
         }
         protected override string CreateTableColumn
@@ -234,9 +234,9 @@ namespace SqlSugar
             }
         }
 
-        protected override string CreateIndexSql 
+        protected override string CreateIndexSql
         {
-            get 
+            get
             {
                 return "CREATE {3} INDEX Index_{0}_{2} ON {0}({1})";
             }
@@ -250,10 +250,24 @@ namespace SqlSugar
             }
         }
 
-        protected override string AddDefaultValueSql => throw new NotSupportedException();
+        protected override string AddDefaultValueSql => throw new NotSupportedException(" Sqlite no support default value");
         #endregion
 
         #region Methods
+        public override bool TruncateTable(string tableName)
+        {
+            base.TruncateTable(tableName);//delete data
+            try
+            {
+                //clear sqlite  identity
+                return this.Context.Ado.ExecuteCommand($"UPDATE sqlite_sequence SET seq = 0 WHERE name = '{tableName}'") > 0;
+            }
+            catch
+            {
+                //if no identity sqlite_sequence
+                return true;
+            }
+        }
         /// <summary>
         ///by current connection string
         /// </summary>
@@ -311,10 +325,20 @@ namespace SqlSugar
                 {
                     var type = dataReader.GetValue(2).ObjToString();
                     var length = 0;
+                    var decimalDigits = 0;
                     if (type.Contains("("))
                     {
-                        type = type.Split('(').First();
+                        if (type.Contains(","))
+                        {
+                            var digit = type.Split('(').Last().TrimEnd(')');
+                            decimalDigits = digit.Split(',').Last().ObjToInt();
+                            length = digit.Split(',').First().ObjToInt();
+                        }
+                        else
+                        {
                         length = type.Split('(').Last().TrimEnd(')').ObjToInt();
+                        }
+                        type = type.Split('(').First();
                     }
                     bool isIdentity = columns.FirstOrDefault(it => it.DbColumnName.Equals(dataReader.GetString(1),StringComparison.CurrentCultureIgnoreCase)).IsIdentity;
                     DbColumnInfo column = new DbColumnInfo()
@@ -327,7 +351,9 @@ namespace SqlSugar
                         DbColumnName = dataReader.GetString(1),
                         DefaultValue = dataReader.GetValue(4).ObjToString(),
                         IsPrimarykey = dataReader.GetBoolean(5).ObjToBool(),
-                        Length = length
+                        Length = length,
+                        DecimalDigits=decimalDigits,
+                        Scale= decimalDigits
                     };
                     result.Add(column);
                 }
@@ -362,7 +388,7 @@ namespace SqlSugar
         {
             return true;
         }
-  
+
 
         public override bool BackupTable(string oldTableName, string newTableName, int maxBackupDataRows = int.MaxValue)
         {
@@ -390,10 +416,21 @@ namespace SqlSugar
                 }
             }
             string sql = GetCreateTableSql(tableName, columns);
-            if (!isCreatePrimaryKey)
+            string primaryKeyInfo = null;
+
+            if (!isCreatePrimaryKey || columns.Count(it => it.IsPrimarykey) > 1)
             {
                 sql = sql.Replace("PRIMARY KEY AUTOINCREMENT", "").Replace("PRIMARY KEY", "");
             }
+
+            if (columns.Count(it => it.IsPrimarykey) > 1 && isCreatePrimaryKey)
+            {
+                primaryKeyInfo = string.Format(",\r\n Primary key({0})", string.Join(",", columns.Where(it => it.IsPrimarykey).Select(it => this.SqlBuilder.GetTranslationColumnName(it.DbColumnName))));
+                primaryKeyInfo = primaryKeyInfo.Replace("`", "\"");
+            }
+
+            sql = sql.Replace("$PrimaryKey", primaryKeyInfo);
+
             this.Context.Ado.ExecuteCommand(sql);
             return true;
         }

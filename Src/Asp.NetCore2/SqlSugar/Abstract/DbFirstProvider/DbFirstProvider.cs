@@ -20,6 +20,9 @@ namespace SqlSugar
         private bool IsAttribute { get; set; }
         private bool IsDefaultValue { get; set; }
         private Func<string, bool> WhereColumnsfunc;
+        private Func<string, string> FormatFileNameFunc { get; set; }
+        private bool IsStringNullable {get;set; }
+        private Func<DbColumnInfo,string,string,string> PropertyTextTemplateFunc { get; set; }
         private ISqlBuilder SqlBuilder
         {
             get
@@ -55,6 +58,11 @@ namespace SqlSugar
         }
 
         #region Setting Template
+        public IDbFirst StringNullable() 
+        {
+            IsStringNullable = true;
+            return this;
+        }
         public IDbFirst SettingClassDescriptionTemplate(Func<string, string> func)
         {
             this.ClassDescriptionTemplate = func(this.ClassDescriptionTemplate);
@@ -88,6 +96,11 @@ namespace SqlSugar
         public IDbFirst SettingPropertyTemplate(Func<string, string> func)
         {
             this.PropertyTemplate = func(this.PropertyTemplate);
+            return this;
+        }
+        public IDbFirst SettingPropertyTemplate(Func<DbColumnInfo, string,string,string> func)
+        {
+            this.PropertyTextTemplateFunc = func;
             return this;
         }
         public RazorFirst UseRazorAnalysis(string razorClassTemplate, string classNamespace = "Models")
@@ -137,6 +150,7 @@ namespace SqlSugar
                 Check.Exception(true, ErrorMessage.GetThrowMessage("Need to achieve ConnectionConfig.ConfigureExternal Services.RazorService", "需要实现 ConnectionConfig.ConfigureExternal Services.RazorService接口"));
             }
             this.Context.Utilities.RemoveCacheAll();
+            result.FormatFileNameFunc = this.FormatFileNameFunc;
             return result;
         }
         #endregion
@@ -145,6 +159,11 @@ namespace SqlSugar
         public IDbFirst IsCreateAttribute(bool isCreateAttribute = true)
         {
             this.IsAttribute = isCreateAttribute;
+            return this;
+        }
+        public IDbFirst FormatFileName(Func<string, string> formatFileNameFunc)
+        {
+            this.FormatFileNameFunc = formatFileNameFunc;
             return this;
         }
         public IDbFirst IsCreateDefaultValue(bool isCreateDefaultValue = true)
@@ -251,7 +270,7 @@ namespace SqlSugar
                     string PropertyDescriptionText = this.PropertyDescriptionTemplate;
                     string propertyName = GetPropertyName(item);
                     string propertyTypeName = GetPropertyTypeName(item);
-                    PropertyText = GetPropertyText(item, PropertyText);
+                    PropertyText =this.PropertyTextTemplateFunc == null? GetPropertyText(item, PropertyText):this.PropertyTextTemplateFunc(item,this.PropertyTemplate, propertyTypeName);
                     PropertyDescriptionText = GetPropertyDescriptionText(item, PropertyDescriptionText);
                     PropertyText = PropertyDescriptionText + PropertyText;
                     classText = classText.Replace(DbFirstTemplate.KeyPropertyName, PropertyText + (isLast ? "" : ("\r\n" + DbFirstTemplate.KeyPropertyName)));
@@ -271,6 +290,7 @@ namespace SqlSugar
             classText = classText.Replace(DbFirstTemplate.KeyPropertyName, null);
             return classText;
         }
+
         internal string GetClassString(List<DbColumnInfo> columns, ref string className)
         {
             string classText = this.ClassTemplate;
@@ -319,7 +339,12 @@ namespace SqlSugar
             {
                 foreach (var item in classStringList)
                 {
-                    var filePath = directoryPath.TrimEnd('\\').TrimEnd('/') + string.Format(seChar + "{0}.cs", item.Key);
+                    var fileName = item.Key;
+                    if (FormatFileNameFunc!= null)
+                    {
+                        fileName = FormatFileNameFunc(fileName);
+                     }
+                    var filePath = directoryPath.TrimEnd('\\').TrimEnd('/') + string.Format(seChar + "{0}.cs", fileName);
                     FileHelper.CreateFile(filePath, item.Value, Encoding.UTF8);
                 }
             }
@@ -410,11 +435,15 @@ namespace SqlSugar
             }
             if (result == "Int32")
             {
-                result = "int";
+                result = item.IsNullable?"int?":"int";
             }
             if (result == "String")
             {
                 result = "string";
+            }
+            if (result == "string" && item.IsNullable && IsStringNullable) 
+            {
+                result = result + "?";
             }
             return result;
         }

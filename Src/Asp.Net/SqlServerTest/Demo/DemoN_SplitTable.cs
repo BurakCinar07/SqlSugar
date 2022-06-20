@@ -72,8 +72,11 @@ namespace OrmTest
             Console.WriteLine();
 
             //按日分表 
-            var x3 = db.Insertable(new OrderSpliteTest() { Name="A" }).SplitTable().ExecuteCommand();
-
+            var x3 = db.Insertable(new OrderSpliteTest() { Name="A",Time=DateTime.Now  }).SplitTable().ExecuteCommand();
+            var x33 = db.Insertable(new OrderSpliteTest() { Name = "A" ,Time=DateTime.Now.AddDays(-11)}).SplitTable().ExecuteCommand();
+            var x333 = db.Insertable(new List<OrderSpliteTest>() { }).SplitTable().ExecuteCommand();
+            var x3333 = db.Updateable(new List<OrderSpliteTest>() { }).SplitTable().ExecuteCommand();
+            var x33333 = db.Deleteable(new List<OrderSpliteTest>() { }).SplitTable().ExecuteCommand();
             Console.WriteLine();
             ////强制分表类型
             var x4 = db.Insertable(new OrderSpliteTest() { Name = "A" ,Time=DateTime.Now.AddDays(-1) }).SplitTable().ExecuteCommand();
@@ -84,6 +87,11 @@ namespace OrmTest
               new OrderSpliteTest() {Pk=Guid.NewGuid(),Name ="a", Time = DateTime.Now },
               new OrderSpliteTest() {Pk=Guid.NewGuid(),Name ="a", Time = DateTime.Now.AddMonths(-10) }
             });
+            var updateList = db.Queryable<OrderSpliteTest>().SplitTable(x1 => x1).Take(10).ToList();
+            db.Updateable(updateList).IgnoreColumns(it=>it.Name).SplitTable().ExecuteCommand();
+
+
+            db.Deleteable(updateList).SplitTable().ExecuteCommand();
 
             db.Fastest<OrderSpliteTest>().SplitTable().BulkUpdate(db.Queryable<OrderSpliteTest>().SplitTable(it=>it).ToList());
             db.Fastest<OrderSpliteTest>().SplitTable().BulkUpdate(db.Queryable<OrderSpliteTest>().SplitTable(it => it).ToList(),new string[] { "pk"},new string[] { "name"});

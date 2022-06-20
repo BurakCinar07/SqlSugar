@@ -85,7 +85,7 @@ namespace SqlSugar
                             value = DBNull.Value;
                         }
                     }
-                    else if (column.UnderType == UtilConstants.DateTimeOffsetType&& value!=null) 
+                    else if (column.UnderType == UtilConstants.DateTimeOffsetType&& value!=null && value != DBNull.Value) 
                     {
                         value = UtilMethods.ConvertFromDateTimeOffset((DateTimeOffset)value);
                     }
@@ -164,6 +164,13 @@ namespace SqlSugar
                     if (dr[column.ColumnName] == null)
                     {
                         dr[column.ColumnName] = DBNull.Value;
+                    }
+                    if (column.DataType==UtilConstants.BoolType&&this.context.CurrentConnectionConfig.DbType.IsIn(DbType.MySql, DbType.MySqlConnector)) 
+                    {
+                        if (Convert.ToBoolean(dr[column.ColumnName]) == false) 
+                        {
+                            dr[column.ColumnName] = DBNull.Value;
+                        }
                     }
                 }
                 tempDataTable.Rows.Add(dr);

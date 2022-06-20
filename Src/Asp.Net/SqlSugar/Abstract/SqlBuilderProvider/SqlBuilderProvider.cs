@@ -160,6 +160,7 @@ namespace SqlSugar
                     }
                     string oldName = item.FieldName;
                     item.FieldName = GetTranslationColumnName(item.FieldName);
+                    item.FieldName = item.FieldName.ToCheckField();
                     switch (item.ConditionalType)
                     {
                         case ConditionalType.Equal:
@@ -188,7 +189,15 @@ namespace SqlSugar
                             break;
                         case ConditionalType.In:
                             if (item.FieldValue == null) item.FieldValue = string.Empty;
-                            var inValue1 = ("(" + item.FieldValue.Split(',').ToJoinSqlInVals() + ")");
+                            var inValue1 = string.Empty;
+                            if (item.CSharpTypeName.EqualCase("string")|| item.CSharpTypeName==null)
+                            {
+                                inValue1 = ("(" + item.FieldValue.Split(',').Distinct().ToArray().ToJoinSqlInVals() + ")");
+                            }
+                            else 
+                            {
+                                inValue1 = ("(" + item.FieldValue.Split(',').Select(it=>it==""?"null":it).Distinct().ToArray().ToJoinSqlInVals() + ")");
+                            }
                             if (item.CSharpTypeName.HasValue()&&UtilMethods.IsNumber(item.CSharpTypeName)) 
                             {
                                 inValue1= inValue1.Replace("'","");
@@ -201,8 +210,16 @@ namespace SqlSugar
                             {
                                 inValue1 = inValue1.Replace("[null]", "null");
                             }
+                            if (item.CSharpTypeName.EqualCase("guid")&& inValue1=="('')") 
+                            {
+                                inValue1 = $"('{Guid.Empty.ToString()}')";
+                            }
+                            else if (inValue1 == "()")
+                            {
+                                inValue1 = $"(NULL)";
+                            }
                             builder.AppendFormat(temp, type, item.FieldName.ToSqlFilter(), "IN", inValue1);
-                            parameters.Add(new SugarParameter(parameterName, item.FieldValue));
+                            //parameters.Add(new SugarParameter(parameterName, item.FieldValue));
                             break;
                         case ConditionalType.NotIn:
                             if (item.FieldValue == null) item.FieldValue = string.Empty;

@@ -265,6 +265,17 @@ namespace OrmTest
             //}).ExecuteCommand();
             var d1111111111111 = db.Queryable<SqlSugarDemo.UserEntity>()
               .Mapper<SqlSugarDemo.UserEntity, SqlSugarDemo.RoleEntity, SqlSugarDemo.UserRoleEntity>(it => ManyToMany.Config(it.UserId, it.RoleId)).InSingle(data.UserId);
+            RefAsync<int> x11 = 0;
+            RefAsync<int> y1 = 0;
+            db.Queryable<Order>().ToPageListAsync(1, 2, x11, y1).GetAwaiter().GetResult();
+            if (x11.Value > 0 && y1.Value == 0) 
+            {
+                throw new Exception("unit test error");
+            }
+            var x3 = Db.Queryable<BoolTest1>().Select(it => new  
+            {
+                a = it.a?1:0
+            }).ToList();
         }
 
 

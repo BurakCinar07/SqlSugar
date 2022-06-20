@@ -53,6 +53,14 @@ namespace SqlSugar
             After(sql, null);
             return result;
         }
+        public virtual string ToSqlString()
+        {
+            var sqlObj = this.ToSql();
+            var result = sqlObj.Key;
+            if (result == null) return null;
+            result = UtilMethods.GetSqlString(this.Context.CurrentConnectionConfig, sqlObj);
+            return result;
+        }
         public virtual KeyValuePair<string, List<SugarParameter>> ToSql()
         {
             InsertBuilder.IsReturnIdentity = true;
@@ -128,6 +136,11 @@ namespace SqlSugar
 
         public virtual long ExecuteReturnSnowflakeId() 
         {
+            if (this.InsertObjs.Length > 1) 
+            {
+                return this.ExecuteReturnSnowflakeIdList().First();
+            }
+
             var id = SnowFlakeSingle.instance.getID();
             var entity = this.Context.EntityMaintenance.GetEntityInfo<T>();
             var snowProperty=entity.Columns.FirstOrDefault(it => it.IsPrimarykey && it.PropertyInfo.PropertyType == UtilConstants.LongType);
@@ -203,6 +216,14 @@ namespace SqlSugar
             object setValue = 0;
             if (idValue > int.MaxValue)
                 setValue = idValue;
+            else if (this.EntityInfo.Columns.Any(it => it.IsIdentity && it.PropertyInfo.PropertyType == typeof(uint))) 
+            {
+                setValue = Convert.ToUInt32(idValue);
+            }
+            else if (this.EntityInfo.Columns.Any(it => it.IsIdentity && it.PropertyInfo.PropertyType == typeof(ulong)))
+            {
+                setValue = Convert.ToUInt64(idValue);
+            }
             else
                 setValue = Convert.ToInt32(idValue);
             this.Context.EntityMaintenance.GetProperty<T>(identityKey).SetValue(result, setValue, null);
@@ -247,6 +268,14 @@ namespace SqlSugar
             object setValue = 0;
             if (idValue > int.MaxValue)
                 setValue = idValue;
+            else if (this.EntityInfo.Columns.Any(it => it.IsIdentity && it.PropertyInfo.PropertyType == typeof(uint)))
+            {
+                setValue = Convert.ToUInt32(idValue);
+            }
+            else if (this.EntityInfo.Columns.Any(it => it.IsIdentity && it.PropertyInfo.PropertyType == typeof(ulong)))
+            {
+                setValue = Convert.ToUInt64(idValue);
+            }
             else
                 setValue = Convert.ToInt32(idValue);
             this.Context.EntityMaintenance.GetProperty<T>(identityKey).SetValue(result, setValue, null);
@@ -291,6 +320,7 @@ namespace SqlSugar
         }
         public IInsertable<T> IgnoreColumns(Expression<Func<T, object>> columns)
         {
+            if (columns == null) return this;
             var ignoreColumns = InsertBuilder.GetExpressionValue(columns, ResolveExpressType.ArraySingle).GetResultArray().Select(it => this.SqlBuilder.GetNoTranslationColumnName(it)).ToList();
             this.InsertBuilder.DbColumnInfoList = this.InsertBuilder.DbColumnInfoList.Where(it => !ignoreColumns.Any(ig => ig.Equals(it.PropertyName, StringComparison.CurrentCultureIgnoreCase))).ToList();
             this.InsertBuilder.DbColumnInfoList = this.InsertBuilder.DbColumnInfoList.Where(it => !ignoreColumns.Any(ig => ig.Equals(it.DbColumnName, StringComparison.CurrentCultureIgnoreCase))).ToList();
@@ -307,6 +337,7 @@ namespace SqlSugar
 
         public IInsertable<T> InsertColumns(Expression<Func<T, object>> columns)
         {
+            if (columns == null) return this;
             var ignoreColumns = InsertBuilder.GetExpressionValue(columns, ResolveExpressType.ArraySingle).GetResultArray().Select(it => this.SqlBuilder.GetNoTranslationColumnName(it)).ToList();
             this.InsertBuilder.DbColumnInfoList = this.InsertBuilder.DbColumnInfoList.Where(it => ignoreColumns.Any(ig => ig.Equals(it.PropertyName, StringComparison.CurrentCultureIgnoreCase)) || ignoreColumns.Any(ig => ig.Equals(it.DbColumnName, StringComparison.CurrentCultureIgnoreCase))).ToList();
             return this;
@@ -314,6 +345,7 @@ namespace SqlSugar
 
         public IInsertable<T> InsertColumns(string[] columns)
         {
+            if (columns == null) return this;
             this.InsertBuilder.DbColumnInfoList = this.InsertBuilder.DbColumnInfoList.Where(it => columns.Any(ig => ig.Equals(it.PropertyName, StringComparison.CurrentCultureIgnoreCase))|| columns.Any(ig => ig.Equals(it.DbColumnName, StringComparison.CurrentCultureIgnoreCase))).ToList();
             return this;
         }
@@ -842,6 +874,10 @@ namespace SqlSugar
         {
 
             if (GetIdentityKeys().HasValue() && this.InsertObjs.Count() > 1)
+            {
+                return GetDiffTableByEntity();
+            }
+            else if (GetIdentityKeys().IsNullOrEmpty()) 
             {
                 return GetDiffTableByEntity();
             }

@@ -25,7 +25,7 @@ namespace SqlSugar
         public virtual string HasValue(MethodCallExpressionModel model)
         {
             var parameter = model.Args[0];
-            return string.Format("( {0}<>'' AND {0} IS NOT NULL )", parameter.MemberName);
+            return string.Format("({0} IS NOT NULL )", parameter.MemberName);
         }
 
         public virtual string HasNumber(MethodCallExpressionModel model)
@@ -525,6 +525,15 @@ namespace SqlSugar
             var parameter = model.Args[0];
             var parameter2 = model.Args[1];
             return string.Format(" ({0} <= {1}) ", parameter.MemberName, parameter2.MemberName);
+        }
+
+        public virtual string Asc(MethodCallExpressionModel model) 
+        {
+            return model.Args[0].MemberName + " ASC ";
+        }
+        public virtual string Desc(MethodCallExpressionModel model)
+        {
+            return model.Args[0].MemberName + " DESC ";
         }
     }
 }

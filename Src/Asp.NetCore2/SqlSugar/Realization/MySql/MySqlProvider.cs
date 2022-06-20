@@ -20,7 +20,8 @@ namespace SqlSugar
                     try
                     {
                         var mySqlConnectionString = base.Context.CurrentConnectionConfig.ConnectionString;
-                        if (!mySqlConnectionString.ToLower().Contains("charset"))
+                        Check.ExceptionEasy(String.IsNullOrEmpty(mySqlConnectionString), "ConnectionString is not null", "连接字符串ConnectionString不能为Null");
+                        if (!mySqlConnectionString.ToLower().Contains("charset")&& !mySqlConnectionString.ToLower().Contains("character"))
                         {
                             mySqlConnectionString = mySqlConnectionString.Trim().TrimEnd(';') + ";charset=utf8;";
                         }
@@ -28,7 +29,14 @@ namespace SqlSugar
                     }
                     catch (Exception ex)
                     {
-                        Check.Exception(true, ErrorMessage.ConnnectionOpen, ex.Message);
+                        if (ex is SqlSugarException)
+                        {
+                            throw ex;
+                        }
+                        else
+                        {
+                            Check.Exception(true, ErrorMessage.ConnnectionOpen, ex.Message);
+                        }
                     }
                 }
                 return base._DbConnection;

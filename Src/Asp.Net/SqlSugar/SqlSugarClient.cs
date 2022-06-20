@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Dynamic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,6 +25,8 @@ namespace SqlSugar
         private MappingColumnList _MappingColumns;
         private IgnoreColumnList _IgnoreColumns;
         private IgnoreColumnList _IgnoreInsertColumns;
+
+
         internal Guid? AsyncId { get; set; }
         internal bool? IsSingleInstance { get; set; }
 
@@ -64,6 +67,55 @@ namespace SqlSugar
         #endregion
 
         #region SimpleClient
+
+        public T CreateContext<T>(bool isTran=true) where T : SugarUnitOfWork, new()
+        {
+            T result = new T();
+            _CreateContext(isTran, result);
+            var type = typeof(T);
+            var ps = type.GetProperties();
+            var cacheKey = "SugarUnitOfWork" + typeof(T).FullName + typeof(T).GetHashCode();
+            var properies = new ReflectionInoCacheService().GetOrCreate(cacheKey,
+                () =>
+                ps.Where(it =>
+
+                (it.PropertyType.BaseType != null && it.PropertyType.BaseType.Name.StartsWith("SimpleClient`"))
+                  ||
+                it.PropertyType.Name.StartsWith("SimpleClient`")
+
+                ));
+            foreach (var item in properies)
+            {
+                var value = Activator.CreateInstance(item.PropertyType);
+                TenantAttribute tenantAttribute = item.PropertyType.GetGenericArguments()[0].GetCustomAttribute<TenantAttribute>();
+                if (tenantAttribute == null)
+                {
+                    value.GetType().GetProperty("Context").SetValue(value, this);
+                }
+                else 
+                {
+                    value.GetType().GetProperty("Context").SetValue(value, this.GetConnection(tenantAttribute.configId));
+                }
+                item.SetValue(result, value);
+            }
+            return result;
+        }
+        public SugarUnitOfWork CreateContext(bool isTran = true)
+        {
+            SugarUnitOfWork sugarUnitOf = new SugarUnitOfWork();
+            return _CreateContext(isTran, sugarUnitOf);
+        }
+        
+        private SugarUnitOfWork _CreateContext(bool isTran, SugarUnitOfWork sugarUnitOf)
+        {
+            sugarUnitOf.Db = this;
+            sugarUnitOf.Tenant = this;
+            sugarUnitOf.IsTran = isTran;
+            this.Open();
+            if (isTran)
+                this.BeginTran();
+            return sugarUnitOf;
+        }
         public SimpleClient<T> GetSimpleClient<T>() where T : class, new()
         {
             return this.Context.GetSimpleClient<T>();
@@ -123,6 +175,14 @@ namespace SqlSugar
         }
         #endregion
 
+        public ISugarQueryable<T> MasterQueryable<T>()
+        {
+            return this.Context.MasterQueryable<T>();
+        }
+        public ISugarQueryable<T> SlaveQueryable<T>()
+        {
+            return this.Context.SlaveQueryable<T>();
+        }
         public ISugarQueryable<T> SqlQueryable<T>(string sql) where T : class, new()
         {
             return this.Context.SqlQueryable<T>(sql);
@@ -321,7 +381,17 @@ namespace SqlSugar
         {
             return this.Context.Queryable(joinQueryable1, joinQueryable2, joinQueryable3, joinType1, joinExpression1, joinType2, joinExpression2).With(SqlWith.Null);
         }
-
+        public ISugarQueryable<T, T2, T3,T4> Queryable<T, T2, T3, T4>(ISugarQueryable<T> joinQueryable1, ISugarQueryable<T2> joinQueryable2, ISugarQueryable<T3> joinQueryable3, ISugarQueryable<T4> joinQueryable4,
+          JoinType joinType1, Expression<Func<T, T2, T3,T4, bool>> joinExpression1,
+          JoinType joinType2, Expression<Func<T, T2, T3, T4, bool>> joinExpression2,
+          JoinType joinType3, Expression<Func<T, T2, T3, T4, bool>> joinExpression3)
+    where T : class, new()
+    where T2 : class, new()
+    where T3 : class, new()
+    where T4 : class ,new ()
+        {
+            return this.Context.Queryable(joinQueryable1, joinQueryable2, joinQueryable3, joinQueryable4, joinType1, joinExpression1, joinType2, joinExpression2,joinType3, joinExpression3).With(SqlWith.Null);
+        }
 
         public ISugarQueryable<T> Queryable<T>()
         {
@@ -333,9 +403,10 @@ namespace SqlSugar
             
             var result= this.Context.Queryable<T>(queryable);
             var QueryBuilder = queryable.QueryBuilder;
-            result.QueryBuilder.WhereIndex = QueryBuilder.WhereIndex++;
-            result.QueryBuilder.LambdaExpressions.ParameterIndex = QueryBuilder.LambdaExpressions.ParameterIndex++;
-            result.QueryBuilder.LambdaExpressions.Index = QueryBuilder.LambdaExpressions.Index++;
+            result.QueryBuilder.IsQueryInQuery = true;
+            var appendIndex = result.QueryBuilder.Parameters==null?1:result.QueryBuilder.Parameters.Count+1;
+            result.QueryBuilder.WhereIndex = (QueryBuilder.WhereIndex+1);
+            result.QueryBuilder.LambdaExpressions.ParameterIndex = (QueryBuilder.LambdaExpressions.ParameterIndex+ appendIndex);
             return result;
         }
 
@@ -350,6 +421,12 @@ namespace SqlSugar
         public StorageableDataTable Storageable(DataTable data)
         {
             return this.Context.Storageable(data);
+        }
+        public StorageableDataTable Storageable(List<Dictionary<string,object>> dictionaryList,string tableName)
+        {
+            DataTable dt = this.Context.Utilities.DictionaryListToDataTable(dictionaryList);
+            dt.TableName = tableName;
+            return this.Context.Storageable(dt);
         }
 
         public IStorageable<T> Storageable<T>(List<T> dataList) where T : class, new()
@@ -580,6 +657,17 @@ namespace SqlSugar
         }
         #endregion
 
+        #region ThenMapper
+        public void ThenMapper<T>(IEnumerable<T> list, Action<T> action)
+        {
+            this.Context.ThenMapper(list, action);
+        }
+        public  Task ThenMapperAsync<T>(IEnumerable<T> list, Func<T, Task> action)
+        {
+            return this.Context.ThenMapperAsync(list,action);
+        }
+        #endregion
+
         #region More api
         public IContextMethods Utilities { get { return this.Context.Utilities; } set { this.Context.Utilities = value; } }
         public AopProvider Aop => this.Context.Aop;
@@ -623,6 +711,22 @@ namespace SqlSugar
                 });
             }
         }
+        public SqlSugarProvider GetConnectionWithAttr<T>() 
+        {
+            var attr = typeof(T).GetCustomAttribute<TenantAttribute>();
+            if (attr == null)
+                return this.GetConnection(this.CurrentConnectionConfig.ConfigId);
+            var configId = attr.configId;
+            return this.GetConnection(configId);
+        }
+        public SqlSugarScopeProvider GetConnectionScopeWithAttr<T>()
+        {
+            var attr = typeof(T).GetCustomAttribute<TenantAttribute>();
+            if (attr == null)
+                return this.GetConnection(this.CurrentConnectionConfig.ConfigId);
+            var configId = attr.configId;
+            return this.GetConnectionScope(configId);
+        }
         public SqlSugarProvider GetConnection(dynamic configId)
         {
             InitTenant();
@@ -645,6 +749,12 @@ namespace SqlSugar
                 db.Context.CurrentConnectionConfig.AopEvents = new AopEvents();
             }
             return db.Context;
+        }
+
+        public SqlSugarScopeProvider GetConnectionScope(dynamic configId)
+        {
+            var conn = GetConnection(configId);
+            return new SqlSugarScopeProvider(conn);
         }
         public bool IsAnyConnection(dynamic configId)
         {
@@ -1131,6 +1241,37 @@ namespace SqlSugar
             }
             _Context = Tenant.Context;
             this.CurrentConnectionConfig = Tenant.ConnectionConfig;
+        }
+        #endregion
+
+        #region Tenant Crud
+        public ISugarQueryable<T> QueryableWithAttr<T>()
+        {
+            return this.GetConnectionWithAttr<T>().Queryable<T>();
+        }
+        public IInsertable<T> InsertableWithAttr<T>(T insertObj) where T : class, new()
+        {
+            return this.GetConnectionWithAttr<T>().Insertable(insertObj);
+        }
+        public IInsertable<T> InsertableWithAttr<T>(List<T> insertObjs) where T : class, new()
+        {
+            return this.GetConnectionWithAttr<T>().Insertable(insertObjs);
+        }
+        public IUpdateable<T> UpdateableWithAttr<T>(T updateObj) where T : class, new()
+        {
+            return this.GetConnectionWithAttr<T>().Updateable(updateObj);
+        }
+        public IUpdateable<T> UpdateableWithAttr<T>(List<T> updateObjs) where T : class, new()
+        {
+            return this.GetConnectionWithAttr<T>().Updateable(updateObjs);
+        }
+        public IDeleteable<T> DeleteableWithAttr<T>(T deleteObject) where T : class, new()
+        {
+            return this.GetConnectionWithAttr<T>().Deleteable(deleteObject);
+        }
+        public IDeleteable<T> DeleteableWithAttr<T>(List<T> deleteObjects) where T : class, new()
+        {
+            return this.GetConnectionWithAttr<T>().Deleteable(deleteObjects);
         }
         #endregion
     }

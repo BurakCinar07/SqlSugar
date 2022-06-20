@@ -80,11 +80,13 @@
     <Compile Include="Models\ViewOrder.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="UnitTest\UCustom03.cs" />
     <Compile Include="UnitTest\Main.cs" />
     <Compile Include="UnitTest\UAdo.cs" />
     <Compile Include="UnitTest\UCodeFirst.cs" />
     <Compile Include="UnitTest\UCustom01.cs" />
     <Compile Include="UnitTest\UCustom011.cs" />
+    <Compile Include="UnitTest\UCustom02.cs" />
     <Compile Include="UnitTest\UDelete.cs" />
     <Compile Include="UnitTest\UJson.cs" />
     <Compile Include="UnitTest\Updateable.cs" />

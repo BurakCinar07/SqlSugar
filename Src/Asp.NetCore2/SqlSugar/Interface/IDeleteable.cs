@@ -29,14 +29,17 @@ namespace SqlSugar
         IDeleteable<T> Where(string whereString, SugarParameter parameter);
         IDeleteable<T> Where(string whereString, SugarParameter[] parameters);
         IDeleteable<T> Where(string whereString, List<SugarParameter> parameters);
-        IDeleteable<T> WhereColumns(Expression<Func<T, object>> columns);
+        IDeleteable<T> WhereColumns(List<T> list,Expression<Func<T, object>> columns);
+        IDeleteable<T> WhereColumns(List<Dictionary<string,object>> columns);
         IDeleteable<T> Where(List<IConditionalModel> conditionalModels);
         IDeleteable<T> EnableDiffLogEvent(object businessData = null);
         IDeleteable<T> RemoveDataCache();
         IDeleteable<T> RemoveDataCache(string likeString);
         KeyValuePair<string, List<SugarParameter>> ToSql();
+        string ToSqlString();
         IDeleteable<T> EnableQueryFilter();
         SplitTableDeleteProvider<T> SplitTable(Func<List<SplitTableInfo>, IEnumerable<SplitTableInfo>> getTableNamesFunc);
+        SplitTableDeleteByObjectProvider<T> SplitTable();
         LogicDeleteProvider<T> IsLogic();
         void AddQueue();
     }

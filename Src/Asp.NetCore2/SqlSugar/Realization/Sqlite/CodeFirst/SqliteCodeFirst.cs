@@ -11,7 +11,10 @@ namespace SqlSugar
         {
             if (entityInfo.Columns.HasValue()&&entityInfo.IsDisabledUpdateAll==false)
             {
-                Check.Exception(entityInfo.Columns.Where(it => it.IsPrimarykey).Count() > 1, "Use Code First ,The primary key must not exceed 1");
+                if (entityInfo.Columns.Where(it => it.IsPrimarykey).Count() > 1) 
+                {
+                    return;
+                }
 
                 var tableName = GetTableName(entityInfo);
                 var dbColumns = this.Context.DbMaintenance.GetColumnInfosByTableName(tableName,false);
@@ -91,7 +94,7 @@ namespace SqlSugar
         {
             var tableName = GetTableName(entityInfo);
             string backupName=tableName+DateTime.Now.ToString("yyyyMMddHHmmss");
-            Check.Exception(entityInfo.Columns.Where(it => it.IsPrimarykey).Count() > 1, "Use Code First ,The primary key must not exceed 1");
+            //Check.Exception(entityInfo.Columns.Where(it => it.IsPrimarykey).Count() > 1, "Use Code First ,The primary key must not exceed 1");
             List<DbColumnInfo> columns = new List<DbColumnInfo>();
             if (entityInfo.Columns.HasValue())
             {

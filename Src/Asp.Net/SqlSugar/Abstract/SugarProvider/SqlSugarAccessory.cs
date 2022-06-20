@@ -199,7 +199,9 @@ namespace SqlSugar
                         OldDbColumnName = item.OldDbColumnName,
                         OracleSequenceName = item.OracleSequenceName,
                         PropertyInfo = item.PropertyInfo,
-                        PropertyName = item.PropertyName
+                        PropertyName = item.PropertyName,
+                        IsArray=item.IsArray,
+                        IsJson=item.IsJson
                     };
                     columns.Add(item);
                 }
@@ -379,6 +381,9 @@ namespace SqlSugar
                 case DbType.PostgreSQL:
                     DependencyManagement.TryPostgreSQL();
                     break;
+                case DbType.OpenGauss:
+                    Check.ExceptionEasy("Use DbType.PostgreSQL , ConnectionString add No Reset On Close=true", "OpenGausso数据库可以使用DbType.PostgreSQL 并且连接字符串加上 No Reset On Close=true");
+                    break;
                 case DbType.Kdbndp:
                     DependencyManagement.TryKdbndb();
                     break;
@@ -468,7 +473,7 @@ namespace SqlSugar
             {
                 ++i;
                 var isLast = joinArray.Length == i;
-                var isJoinType = item.IsIn(JoinType.Inner.ToString(), JoinType.Left.ToString(), JoinType.Right.ToString());
+                var isJoinType = item.IsIn(JoinType.Full.ToString(),JoinType.Inner.ToString(), JoinType.Left.ToString(), JoinType.Right.ToString());
                 if (isJoinType)
                 {
                     if (joinValue != null)

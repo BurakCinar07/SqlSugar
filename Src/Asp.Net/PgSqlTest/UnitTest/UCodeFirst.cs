@@ -1,4 +1,5 @@
-﻿using System;
+﻿using SqlSugar;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -37,6 +38,40 @@ namespace OrmTest
             Db.CodeFirst.InitTables<UnitLong1>();
             Db.Insertable(new List<UnitLong1>() { new UnitLong1() { Num = null }, new UnitLong1() { Num = null } }) 
                 .UseParameter().ExecuteCommand();
+            if (Db.DbMaintenance.IsAnyTable("User", false))
+                Db.DbMaintenance.DropTable("User");
+            Db.CodeFirst.InitTables<User>();
+            if (Db.DbMaintenance.IsAnyTable("UnitCodeFirst131", false))
+                Db.DbMaintenance.DropTable("UnitCodeFirst131");
+            Db.CodeFirst.InitTables<UnitCodeFirst131>();
+            Db.Insertable(new UnitCodeFirst131() { Id = 1 }).ExecuteCommand();
+            Db.CodeFirst.InitTables<UNITCODEFIRST131>();
+            Db.CodeFirst.InitTables<UNITCOdEFIRST131>();
+        }
+        public class UnitCodeFirst131
+        {
+            public int Id { get; set; }
+        }
+        public class UNITCODEFIRST131
+        {
+            public int Id { get; set; }
+            [SqlSugar.SugarColumn(DefaultValue = "a")]
+            public string Name { get; set; }
+        }
+        public class UNITCOdEFIRST131
+        {
+            public int Id { get; set; }
+            [SqlSugar.SugarColumn(DefaultValue = "a")]
+            public string Name { get; set; }
+            [SqlSugar.SugarColumn(DefaultValue = "0")]
+            public int dt { get; set; }
+        }
+        public class User
+        {
+            [SugarColumn(IndexGroupNameList = new string[] { "index" })]
+            public int key { get; set; }
+            [SugarColumn(UniqueGroupNameList = new string[] { "index" })]
+            public int key2 { get; set; }
         }
         public class UnitLong1
         {

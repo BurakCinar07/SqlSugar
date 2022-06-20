@@ -351,13 +351,13 @@ namespace SqlSugar
             try
             {
                 InitParameters(ref sql, parameters);
-                if (FormatSql != null)
+                if (IsFormat(parameters))
                     sql = FormatSql(sql);
-                if (this.Context.CurrentConnectionConfig?.SqlMiddle?.IsSqlMiddle==true)
+                if (this.Context.CurrentConnectionConfig?.SqlMiddle?.IsSqlMiddle == true)
                     return this.Context.CurrentConnectionConfig.SqlMiddle.ExecuteCommand(sql, parameters);
                 SetConnectionStart(sql);
                 if (this.ProcessingEventStartingSQL != null)
-                    ExecuteProcessingSQL(ref sql,ref parameters);
+                    ExecuteProcessingSQL(ref sql, ref parameters);
                 ExecuteBefore(sql, parameters);
                 IDbCommand sqlCommand = GetCommand(sql, parameters);
                 int count = sqlCommand.ExecuteNonQuery();
@@ -369,6 +369,7 @@ namespace SqlSugar
             }
             catch (Exception ex)
             {
+                SugarCatch(ex, sql,parameters);
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
@@ -385,7 +386,7 @@ namespace SqlSugar
             try
             {
                 InitParameters(ref sql, parameters);
-                if (FormatSql != null)
+                if (IsFormat(parameters))
                     sql = FormatSql(sql);
                 if (this.Context.CurrentConnectionConfig?.SqlMiddle?.IsSqlMiddle == true)
                     return this.Context.CurrentConnectionConfig.SqlMiddle.GetDataReader(sql, parameters);
@@ -408,6 +409,7 @@ namespace SqlSugar
             }
             catch (Exception ex)
             {
+                SugarCatch(ex, sql, parameters);
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
@@ -419,7 +421,7 @@ namespace SqlSugar
             try
             {
                 InitParameters(ref sql, parameters);
-                if (FormatSql != null)
+                if (IsFormat(parameters))
                     sql = FormatSql(sql);
                 if (this.Context.CurrentConnectionConfig?.SqlMiddle?.IsSqlMiddle == true)
                     return this.Context.CurrentConnectionConfig.SqlMiddle.GetDataSetAll(sql, parameters);
@@ -440,6 +442,7 @@ namespace SqlSugar
             }
             catch (Exception ex)
             {
+                SugarCatch(ex, sql, parameters);
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
@@ -456,7 +459,7 @@ namespace SqlSugar
             try
             {
                 InitParameters(ref sql, parameters);
-                if (FormatSql != null)
+                if (IsFormat(parameters))
                     sql = FormatSql(sql);
                 if (this.Context.CurrentConnectionConfig?.SqlMiddle?.IsSqlMiddle == true)
                     return this.Context.CurrentConnectionConfig.SqlMiddle.GetScalar(sql, parameters);
@@ -475,6 +478,7 @@ namespace SqlSugar
             }
             catch (Exception ex)
             {
+                SugarCatch(ex, sql, parameters);
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
@@ -493,7 +497,7 @@ namespace SqlSugar
             {
                 Async();
                 InitParameters(ref sql, parameters);
-                if (FormatSql != null)
+                if (IsFormat(parameters))
                     sql = FormatSql(sql);
                 if (this.Context.CurrentConnectionConfig?.SqlMiddle?.IsSqlMiddle == true)
                     return await this.Context.CurrentConnectionConfig.SqlMiddle.ExecuteCommandAsync(sql, parameters);
@@ -515,6 +519,7 @@ namespace SqlSugar
             }
             catch (Exception ex)
             {
+                SugarCatch(ex, sql, parameters);
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
@@ -532,7 +537,7 @@ namespace SqlSugar
             {
                 Async();
                 InitParameters(ref sql, parameters);
-                if (FormatSql != null)
+                if (IsFormat(parameters))
                     sql = FormatSql(sql);
                 if (this.Context.CurrentConnectionConfig?.SqlMiddle?.IsSqlMiddle == true)
                     return await this.Context.CurrentConnectionConfig.SqlMiddle.GetDataReaderAsync(sql, parameters);
@@ -559,6 +564,7 @@ namespace SqlSugar
             }
             catch (Exception ex)
             {
+                SugarCatch(ex, sql, parameters);
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
@@ -571,7 +577,7 @@ namespace SqlSugar
             {
                 Async();
                 InitParameters(ref sql, parameters);
-                if (FormatSql != null)
+                if (IsFormat(parameters))
                     sql = FormatSql(sql);
                 if (this.Context.CurrentConnectionConfig?.SqlMiddle?.IsSqlMiddle == true)
                     return await this.Context.CurrentConnectionConfig.SqlMiddle.GetScalarAsync(sql, parameters);
@@ -594,6 +600,7 @@ namespace SqlSugar
             }
             catch (Exception ex)
             {
+                SugarCatch(ex, sql, parameters);
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
@@ -1282,6 +1289,14 @@ namespace SqlSugar
         #endregion
 
         #region  Helper
+
+        private void SugarCatch(Exception ex, string sql, SugarParameter[] parameters)
+        {
+            if (sql != null && sql.Contains("{year}{month}{day}")) 
+            {
+                Check.ExceptionEasy("need .SplitTable() message:" + ex.Message, "当前代码是否缺少 .SplitTable() ,可以看文档 [分表]  , 详细错误:" + ex.Message);
+            }
+        }
         public virtual void RemoveCancellationToken()
         {
             this.CancellationToken = null;
@@ -1439,6 +1454,10 @@ namespace SqlSugar
             var connectionString2Array = connectionString2.Split(';');
             var result = connectionString1Array.Except(connectionString2Array);
             return result.Count() == 0;
+        }
+        private bool IsFormat(SugarParameter[] parameters)
+        {
+            return FormatSql != null && parameters != null && parameters.Length > 0;
         }
 
         protected void SetConnectionEnd(string sql)

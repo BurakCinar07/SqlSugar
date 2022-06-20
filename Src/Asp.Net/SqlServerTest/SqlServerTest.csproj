@@ -39,6 +39,7 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <Prefer32Bit>false</Prefer32Bit>
+    <DocumentationFile>bin\Debug\OrmTest.xml</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
@@ -85,6 +86,7 @@
     <Compile Include="Demo\DemoN_SplitTable.cs" />
     <Compile Include="Models\DataDictionary.cs" />
     <Compile Include="Models\Custom.cs" />
+    <Compile Include="Models\DiffLong.cs" />
     <Compile Include="Models\EntityMapper.cs" />
     <Compile Include="Models\Mapper.cs" />
     <Compile Include="Models\SubInsertTest.cs" />
@@ -94,12 +96,33 @@
     <Compile Include="Models\OrderItem.cs" />
     <Compile Include="Demo\Demo0_SqlSugarClient.cs" />
     <Compile Include="Models\ViewOrder.cs" />
+    <Compile Include="UnitTest\UCustomNavigate01.cs" />
+    <Compile Include="UnitTest\Models\DSPersonScheduleModel.cs" />
+    <Compile Include="UnitTest\Models\PersonScheduleParam.cs" />
+    <Compile Include="UnitTest\Models\T_BAS_AIRPORT.cs" />
+    <Compile Include="UnitTest\Models\V_PERSON_SCHEDULE_A.cs" />
+    <Compile Include="UnitTest\UCustom023.cs" />
+    <Compile Include="UnitTest\UCustom22.cs" />
+    <Compile Include="UnitTest\UCustom021.cs" />
+    <Compile Include="UnitTest\UByteArray.cs" />
+    <Compile Include="UnitTest\UIncludesBigData.cs" />
+    <Compile Include="UnitTest\UCustom020.cs" />
+    <Compile Include="UnitTest\UCustom019.cs" />
+    <Compile Include="UnitTest\UintDynamic.cs" />
+    <Compile Include="UnitTest\UnitManyToMany.cs" />
+    <Compile Include="UnitTest\UCustom018.cs" />
     <Compile Include="UnitTest\Models\Order.cs" />
     <Compile Include="UnitTest\Models\RoleEntity.cs" />
     <Compile Include="UnitTest\Models\TestModel.cs" />
     <Compile Include="UnitTest\Models\UserEntity.cs" />
     <Compile Include="UnitTest\Models\UserRoleEntity.cs" />
+    <Compile Include="UnitTest\UCustom017.cs" />
+    <Compile Include="UnitTest\UCustom016.cs" />
+    <Compile Include="UnitTest\UCustom015.cs" />
+    <Compile Include="UnitTest\UCustom014.cs" />
+    <Compile Include="UnitTest\UCustom013.cs" />
     <Compile Include="UnitTest\UCustom01.cs" />
+    <Compile Include="UnitTest\UCustom012.cs" />
     <Compile Include="UnitTest\UCustom09.cs" />
     <Compile Include="UnitTest\UCustom011.cs" />
     <Compile Include="UnitTest\UCustom02.cs" />
@@ -156,7 +179,9 @@
       <SubType>Designer</SubType>
     </None>
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <Content Include="UnitTest\Sql\UIncludesBigData.sql" />
+  </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.6">
       <Visible>False</Visible>

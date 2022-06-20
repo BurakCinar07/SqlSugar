@@ -38,6 +38,14 @@ namespace SqlSugar
         #endregion
 
         #region Core
+        public virtual string ToSqlString()
+        {
+            var sqlObj = this.ToSql();
+            var result = sqlObj.Key;
+            if (result == null) return null;
+            result = UtilMethods.GetSqlString(this.Context.CurrentConnectionConfig, sqlObj);
+            return result;
+        }
 
         public KeyValuePair<string, List<SugarParameter>> ToSql()
         {
@@ -101,6 +109,19 @@ namespace SqlSugar
             var tables = getTableNamesFunc(helper.GetTables());
             result.Tables = tables;
             result.updateobj= this;
+            return result;
+        }
+        public SplitTableUpdateByObjectProvider<T> SplitTable()
+        {
+            Check.ExceptionEasy(UpdateParameterIsNull, "SplitTable() not supported db.Updateable<T>(),use db.Updateable(list)", ".SplitTable()不支持 db.Updateable<T>()方式更新,请使用 db.Updateable(list) 对象方式更新, 或者使用 .SplitTable(+1)重载");
+            SplitTableUpdateByObjectProvider<T> result = new SplitTableUpdateByObjectProvider<T>();
+            result.Context = this.Context;
+            result.UpdateObjects = this.UpdateObjs;
+            SplitTableContext helper = new SplitTableContext(Context)
+            {
+                EntityInfo = this.EntityInfo
+            };
+            result.updateobj = this;
             return result;
         }
         public IUpdateable<T> RemoveDataCache()
@@ -398,6 +419,10 @@ namespace SqlSugar
             if (expression.ToString().Contains("Subqueryable()"))
             {
                 whereString = whereString.Replace(this.SqlBuilder.GetTranslationColumnName(expression.Parameters.First().Name) + ".", this.SqlBuilder.GetTranslationTableName(this.EntityInfo.DbTableName) + ".");
+            }
+            else if (expResult.IsNavicate)
+            {
+                whereString = whereString.Replace(expression.Parameters.First().Name + ".", this.SqlBuilder.GetTranslationTableName(this.EntityInfo.DbTableName) + ".");
             }
             UpdateBuilder.WhereValues.Add(whereString);
             return this;
@@ -855,7 +880,7 @@ namespace SqlSugar
                 {
                     whereSql=Regex.Match(sql, @"\(EXISTS.+").Value;
                 }
-                dt = this.Context.Queryable<T>().Where(whereSql).AddParameters(parameters).ToDataTable();
+                dt = this.Context.Queryable<T>().Filter(null, true).Where(whereSql).AddParameters(parameters).ToDataTable();
             }
             else 
             {
@@ -865,7 +890,7 @@ namespace SqlSugar
                 }
                 else
                 {
-                    dt = this.Context.Queryable<T>().WhereClassByPrimaryKey(this.UpdateObjs.ToList()).ToDataTable();
+                    dt = this.Context.Queryable<T>().Filter(null, true).WhereClassByPrimaryKey(this.UpdateObjs.ToList()).ToDataTable();
                 }
             }
             if (dt.Rows != null && dt.Rows.Count > 0)

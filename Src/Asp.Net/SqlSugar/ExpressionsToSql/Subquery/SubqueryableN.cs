@@ -228,6 +228,26 @@ namespace SqlSugar
         {
             return this;
         }
+        public Subqueryable<T1, T2, T3,T4> WhereIF(bool isWhere, Func<T1, T2, T3,T4, bool> expression)
+        {
+            return this;
+        }
+        public TResult Select<TResult>(Func<T1, T2, T3,T4, TResult> expression) where TResult : struct
+        {
+            return default(TResult);
+        }
+        public string Select(Func<T1, T2, T3,T4, string> expression)
+        {
+            return default(string);
+        }
+        public Subqueryable<T1, T2, T3,T4> OrderBy(Func<T1, T2, T3,T4, object> expression)
+        {
+            return this;
+        }
+        public Subqueryable<T1, T2, T3,T4> GroupBy(Func<T1, T2, T3,T4, object> expression)
+        {
+            return this;
+        }
     }
     public class Subqueryable<T1, T2, T3> : Subqueryable<T1> where T1 : class, new()
     {
@@ -251,6 +271,26 @@ namespace SqlSugar
         {
             return this;
         }
+        public Subqueryable<T1, T2,T3> WhereIF(bool isWhere, Func<T1, T2,T3, bool> expression)
+        {
+            return this;
+        }
+        public Subqueryable<T1, T2,T3> OrderBy(Func<T1, T2,T3, object> expression)
+        {
+            return this;
+        }
+        public Subqueryable<T1, T2,T3> GroupBy(Func<T1, T2,T3, object> expression)
+        {
+            return this;
+        }
+        public TResult Select<TResult>(Func<T1, T2,T3, TResult> expression) where TResult : struct
+        {
+            return default(TResult);
+        }
+        public string Select(Func<T1, T2,T3, string> expression)
+        {
+            return default(string);
+        }
     }
     public class Subqueryable<T1, T2> : Subqueryable<T1> where T1 : class, new()
     {
@@ -269,6 +309,26 @@ namespace SqlSugar
         public Subqueryable<T1, T2> Where(Func<T1, T2, bool> expression)
         {
             return this;
+        }
+        public Subqueryable<T1,T2> OrderBy(Func<T1,T2, object> expression)
+        {
+            return this;
+        }
+        public Subqueryable<T1,T2> GroupBy(Func<T1,T2, object> expression)
+        {
+            return this;
+        }
+        public Subqueryable<T1,T2> WhereIF(bool isWhere, Func<T1, T2, bool> expression)
+        {
+            return this;
+        }
+        public TResult Select<TResult>(Func<T1,T2, TResult> expression) where TResult : struct
+        {
+            return default(TResult);
+        }
+        public string Select(Func<T1, T2, string> expression)  
+        {
+            return default(string);
         }
     }
 }

@@ -15,7 +15,7 @@ namespace SqlSugar
         }
         public virtual List<DbTableInfo> GetViewInfoList(bool isCache = true)
         {
-            string cacheKey = "DbMaintenanceProvider.GetViewInfoList";
+            string cacheKey = "DbMaintenanceProvider.GetViewInfoList" + this.Context.CurrentConnectionConfig.ConfigId;
             cacheKey = GetCacheKey(cacheKey);
             var result = new List<DbTableInfo>();
             if (isCache)
@@ -30,7 +30,7 @@ namespace SqlSugar
         }
         public virtual List<DbTableInfo> GetTableInfoList(bool isCache = true)
         {
-            string cacheKey = "DbMaintenanceProvider.GetTableInfoList";
+            string cacheKey = "DbMaintenanceProvider.GetTableInfoList"+this.Context.CurrentConnectionConfig.ConfigId;
             cacheKey = GetCacheKey(cacheKey);
             var result = new List<DbTableInfo>();
             if (isCache)
@@ -46,7 +46,7 @@ namespace SqlSugar
         public virtual List<DbColumnInfo> GetColumnInfosByTableName(string tableName, bool isCache = true)
         {
             if (string.IsNullOrEmpty(tableName)) return new List<DbColumnInfo>();
-            string cacheKey = "DbMaintenanceProvider.GetColumnInfosByTableName." + this.SqlBuilder.GetNoTranslationColumnName(tableName).ToLower();
+            string cacheKey = "DbMaintenanceProvider.GetColumnInfosByTableName." + this.SqlBuilder.GetNoTranslationColumnName(tableName).ToLower() + this.Context.CurrentConnectionConfig.ConfigId;
             cacheKey = GetCacheKey(cacheKey);
             var sql = string.Format(this.GetColumnInfosByTableNameSql, tableName);
             if (isCache)
@@ -57,7 +57,7 @@ namespace SqlSugar
         }
         public virtual List<string> GetIsIdentities(string tableName)
         {
-            string cacheKey = "DbMaintenanceProvider.GetIsIdentities" + this.SqlBuilder.GetNoTranslationColumnName(tableName).ToLower();
+            string cacheKey = "DbMaintenanceProvider.GetIsIdentities" + this.SqlBuilder.GetNoTranslationColumnName(tableName).ToLower() + this.Context.CurrentConnectionConfig.ConfigId;
             cacheKey = GetCacheKey(cacheKey);
             return this.Context.Utilities.GetReflectionInoCacheInstance().GetOrCreate(cacheKey, () =>
                      {
@@ -67,7 +67,7 @@ namespace SqlSugar
         }
         public virtual List<string> GetPrimaries(string tableName)
         {
-            string cacheKey = "DbMaintenanceProvider.GetPrimaries" + this.SqlBuilder.GetNoTranslationColumnName(tableName).ToLower();
+            string cacheKey = "DbMaintenanceProvider.GetPrimaries" + this.SqlBuilder.GetNoTranslationColumnName(tableName).ToLower() + this.Context.CurrentConnectionConfig.ConfigId;
             cacheKey = GetCacheKey(cacheKey);
             return this.Context.Utilities.GetReflectionInoCacheInstance().GetOrCreate(cacheKey, () =>
              {
@@ -196,8 +196,30 @@ namespace SqlSugar
         public virtual bool AddColumn(string tableName, DbColumnInfo columnInfo)
         {
             tableName = this.SqlBuilder.GetTranslationTableName(tableName);
+            var isAddNotNUll = columnInfo.IsNullable == false && columnInfo.DefaultValue.HasValue();
+            if (isAddNotNUll)
+            {
+                columnInfo = this.Context.Utilities.TranslateCopy(columnInfo);
+                columnInfo.IsNullable = true;
+            }
             string sql = GetAddColumnSql(tableName, columnInfo);
             this.Context.Ado.ExecuteCommand(sql);
+            if (isAddNotNUll) 
+            {
+                var dtColums = this.Context.Queryable<object>().AS(columnInfo.TableName).Where("1=2")
+                    .Select(this.SqlBuilder.GetTranslationColumnName(columnInfo.DbColumnName)).ToDataTable().Columns.Cast<System.Data.DataColumn>();
+                var dtColumInfo = dtColums.First(it => it.ColumnName.EqualCase(columnInfo.DbColumnName));
+                var type = UtilMethods.GetUnderType(dtColumInfo.DataType);
+                var value= type==UtilConstants.StringType?(object)"": Activator.CreateInstance(type);
+                var dt = new Dictionary<string, object>();
+                dt.Add(columnInfo.DbColumnName, value);
+                this.Context.Updateable(dt)
+                             .AS(tableName)
+                             .Where($"{columnInfo.DbColumnName} is null ").ExecuteCommand();
+                if(this.Context.CurrentConnectionConfig.DbType!=DbType.Oracle)
+                   columnInfo.IsNullable = false;
+                UpdateColumn(tableName, columnInfo);
+            }
             return true;
         }
         public virtual bool UpdateColumn(string tableName, DbColumnInfo column)
@@ -219,6 +241,27 @@ namespace SqlSugar
         {
             this.Context.InitMappingInfo<T>();
             return this.TruncateTable(this.Context.EntityMaintenance.GetEntityInfo<T>().DbTableName);
+        }
+        public virtual bool TruncateTable<T,T2>()
+        {
+            TruncateTable<T>();
+            TruncateTable<T2>();
+            return true;
+        }
+        public virtual bool TruncateTable<T, T2,T3>()
+        {
+            TruncateTable<T>();
+            TruncateTable<T2>();
+            TruncateTable<T3>();
+            return true;
+        }
+        public virtual bool TruncateTable<T, T2, T3,T4>()
+        {
+            TruncateTable<T>();
+            TruncateTable<T2>();
+            TruncateTable<T3>();
+            TruncateTable<T4>();
+            return true;
         }
         public virtual bool DropColumn(string tableName, string columnName)
         {
@@ -315,13 +358,21 @@ namespace SqlSugar
         }
         public virtual bool CreateIndex(string tableName, string[] columnNames, bool isUnique=false)
         {
-            string sql = string.Format(CreateIndexSql,tableName,string.Join(",",columnNames), string.Join("_", columnNames) + this.Context.CurrentConnectionConfig.IndexSuffix, isUnique ? "UNIQUE" : "");
+            string sql = string.Format(CreateIndexSql,this.SqlBuilder.GetTranslationTableName(tableName),string.Join(",",columnNames.Select(it=>this.SqlBuilder.GetTranslationColumnName(it))), string.Join("_", columnNames) + this.Context.CurrentConnectionConfig.IndexSuffix, isUnique ? "UNIQUE" : "");
+            sql = sql.Replace("_" + this.SqlBuilder.SqlTranslationLeft, "_");
+            sql = sql.Replace(  this.SqlBuilder.SqlTranslationRight+"_", "_");
+            sql = sql.Replace(this.SqlBuilder.SqlTranslationLeft+ this.SqlBuilder.SqlTranslationLeft, this.SqlBuilder.SqlTranslationLeft);
+            sql = sql.Replace(this.SqlBuilder.SqlTranslationRight + this.SqlBuilder.SqlTranslationRight, this.SqlBuilder.SqlTranslationRight);
             this.Context.Ado.ExecuteCommand(sql);
             return true;
         }
         public virtual bool CreateUniqueIndex(string tableName, string[] columnNames)
         {
-            string sql = string.Format(CreateIndexSql, tableName, string.Join(",", columnNames), string.Join("_", columnNames) + this.Context.CurrentConnectionConfig.IndexSuffix + "_Unique","UNIQUE" );
+            string sql = string.Format(CreateIndexSql, this.SqlBuilder.GetTranslationTableName(tableName), string.Join(",", columnNames.Select(it => this.SqlBuilder.GetTranslationColumnName(it))), string.Join("_", columnNames) + this.Context.CurrentConnectionConfig.IndexSuffix + "_Unique","UNIQUE" );
+            sql = sql.Replace("_" + this.SqlBuilder.SqlTranslationLeft, "_");
+            sql = sql.Replace(this.SqlBuilder.SqlTranslationRight + "_", "_");
+            sql = sql.Replace(this.SqlBuilder.SqlTranslationLeft + this.SqlBuilder.SqlTranslationLeft, this.SqlBuilder.SqlTranslationLeft);
+            sql = sql.Replace(this.SqlBuilder.SqlTranslationRight + this.SqlBuilder.SqlTranslationRight, this.SqlBuilder.SqlTranslationRight);
             this.Context.Ado.ExecuteCommand(sql);
             return true;
         }

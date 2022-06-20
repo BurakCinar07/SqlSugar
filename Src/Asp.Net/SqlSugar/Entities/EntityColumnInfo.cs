@@ -19,7 +19,9 @@ namespace SqlSugar
         public bool IsNullable { get; set; }
         public bool IsIdentity { get; set; }
         public bool IsPrimarykey { get; set; }
+        public bool IsTreeKey { get; set; }
         public bool IsEnableUpdateVersionValidation { get; set; }
+        public object SqlParameterDbType { get; set; }
         public string EntityName { get;  set; }
         public string DbTableName { get; set; }
         public bool IsIgnore { get;  set; }
@@ -36,5 +38,6 @@ namespace SqlSugar
         public string[] UIndexGroupNameList { get;  set; }
         public bool IsArray { get;  set; }
         public Type UnderType { get;  set; }
+        public Navigate Navigat { get; set; }
     }
 }

@@ -69,6 +69,64 @@ namespace SqlSugar
             return isAsync;
         }
 
+
+        public static ConnectionConfig CopyConfig(ConnectionConfig it)
+        {
+            return new ConnectionConfig()
+            {
+                AopEvents =it.AopEvents==null?null:new AopEvents() { 
+                   DataExecuting=it.AopEvents?.DataExecuting,
+                   OnDiffLogEvent=it.AopEvents?.OnDiffLogEvent,
+                   OnError=it.AopEvents?.OnError,
+                   OnExecutingChangeSql=it.AopEvents?.OnExecutingChangeSql,
+                   OnLogExecuted=it.AopEvents?.OnLogExecuted,
+                   OnLogExecuting= it.AopEvents?.OnLogExecuting,
+                },
+                ConfigId = it.ConfigId,
+                ConfigureExternalServices =it.ConfigureExternalServices==null?null:new ConfigureExternalServices() { 
+                      AppendDataReaderTypeMappings=it.ConfigureExternalServices.AppendDataReaderTypeMappings,
+                      DataInfoCacheService=it.ConfigureExternalServices.DataInfoCacheService,
+                      EntityNameService=it.ConfigureExternalServices.EntityNameService,
+                      EntityService=it.ConfigureExternalServices.EntityService,
+                      RazorService=it.ConfigureExternalServices.RazorService,
+                      ReflectionInoCacheService=it.ConfigureExternalServices.ReflectionInoCacheService,
+                      SerializeService=it.ConfigureExternalServices.SerializeService,
+                      SplitTableService=it.ConfigureExternalServices.SplitTableService,
+                      SqlFuncServices=it.ConfigureExternalServices.SqlFuncServices
+                },
+                ConnectionString = it.ConnectionString,
+                DbType = it.DbType,
+                IndexSuffix = it.IndexSuffix,
+                InitKeyType = it.InitKeyType,
+                IsAutoCloseConnection = it.IsAutoCloseConnection,
+                LanguageType = it.LanguageType,
+                MoreSettings = it.MoreSettings == null ? null : new ConnMoreSettings()
+                {
+                    DefaultCacheDurationInSeconds = it.MoreSettings.DefaultCacheDurationInSeconds,
+                    DisableNvarchar = it.MoreSettings.DisableNvarchar,
+                    PgSqlIsAutoToLower = it.MoreSettings.PgSqlIsAutoToLower,
+                    IsAutoRemoveDataCache = it.MoreSettings.IsAutoRemoveDataCache,
+                    IsWithNoLockQuery = it.MoreSettings.IsWithNoLockQuery,
+                    TableEnumIsString = it.MoreSettings.TableEnumIsString,
+                    DisableMillisecond = it.MoreSettings.DisableMillisecond,
+                    DbMinDate=it.MoreSettings.DbMinDate
+                },
+                SqlMiddle = it.SqlMiddle == null ? null : new SqlMiddle
+                {
+                    IsSqlMiddle = it.SqlMiddle.IsSqlMiddle,
+                    ExecuteCommand = it.SqlMiddle.ExecuteCommand,
+                    ExecuteCommandAsync = it.SqlMiddle.ExecuteCommandAsync,
+                    GetDataReader = it.SqlMiddle.GetDataReader,
+                    GetDataReaderAsync = it.SqlMiddle.GetDataReaderAsync,
+                    GetDataSetAll = it.SqlMiddle.GetDataSetAll,
+                    GetDataSetAllAsync = it.SqlMiddle.GetDataSetAllAsync,
+                    GetScalar = it.SqlMiddle.GetScalar,
+                    GetScalarAsync = it.SqlMiddle.GetScalarAsync
+                },
+                SlaveConnectionConfigs = it.SlaveConnectionConfigs
+            };
+        }
+
         public static bool IsAsyncMethod(MethodBase method)
         {
             if (method == null)
@@ -136,6 +194,23 @@ namespace SqlSugar
         {
             return (T)To(value, typeof(T));
         }
+
+        internal static DateTime GetMinDate(ConnectionConfig currentConnectionConfig)
+        {
+            if (currentConnectionConfig.MoreSettings == null)
+            {
+                return Convert.ToDateTime("1900-01-01");
+            }
+            else if (currentConnectionConfig.MoreSettings.DbMinDate == null)
+            {
+                return Convert.ToDateTime("1900-01-01");
+            }
+            else 
+            {
+                return currentConnectionConfig.MoreSettings.DbMinDate.Value;
+            }
+        }
+
         internal static Type GetUnderType(Type oldType)
         {
             Type type = Nullable.GetUnderlyingType(oldType);
@@ -500,7 +575,7 @@ namespace SqlSugar
             {
                 return Convert.ToInt32(item.FieldValue);
             }
-            else if (item.CSharpTypeName .EqualCase("long"))
+            else if (item.CSharpTypeName.EqualCase("long"))
             {
                 return Convert.ToInt64(item.FieldValue);
             }
@@ -512,11 +587,11 @@ namespace SqlSugar
             {
                 return Convert.ToByte(item.FieldValue);
             }
-            else if (item.CSharpTypeName.EqualCase( "uint"))
+            else if (item.CSharpTypeName.EqualCase("uint"))
             {
                 return Convert.ToUInt32(item.FieldValue);
             }
-            else if (item.CSharpTypeName.EqualCase( "ulong"))
+            else if (item.CSharpTypeName.EqualCase("ulong"))
             {
                 return Convert.ToUInt64(item.FieldValue);
             }
@@ -524,17 +599,29 @@ namespace SqlSugar
             {
                 return Convert.ToUInt16(item.FieldValue);
             }
-            else if (item.CSharpTypeName.EqualCase( "uint32"))
+            else if (item.CSharpTypeName.EqualCase("uint32"))
             {
                 return Convert.ToUInt32(item.FieldValue);
             }
-            else if (item.CSharpTypeName.EqualCase( "uint64"))
+            else if (item.CSharpTypeName.EqualCase("uint64"))
             {
                 return Convert.ToUInt64(item.FieldValue);
+            }
+            else if (item.CSharpTypeName.EqualCase("bool"))
+            {
+                return Convert.ToBoolean(item.FieldValue);
+            }
+            else if (item.CSharpTypeName.EqualCase("ToBoolean"))
+            {
+                return Convert.ToBoolean(item.FieldValue);
             }
             else if (item.CSharpTypeName.EqualCase("uint16"))
             {
                 return Convert.ToUInt16(item.FieldValue);
+            }
+            else if (item.CSharpTypeName.EqualCase("byte[]")&&item.FieldValue!=null&&item.FieldValue.Contains("|")) 
+            {
+                return item.FieldValue.Split('|').Select(it=>Convert.ToByte(it)).ToArray();
             }
             else
             {
@@ -651,6 +738,76 @@ namespace SqlSugar
             //本周第一天
             string FirstDay = datetime.AddDays(daydiff).ToString("yyyy-MM-dd");
             return Convert.ToDateTime(FirstDay);
+        }
+        public static string GetSqlString(DbType dbType, string sql, SugarParameter []  parametres,bool DisableNvarchar=false) 
+        {
+            if (parametres == null)
+                parametres = new SugarParameter[] { };
+            return GetSqlString(new ConnectionConfig()
+            {
+                DbType = dbType,
+                MoreSettings=new ConnMoreSettings() 
+                { 
+                     DisableNvarchar=DisableNvarchar
+                }
+            },new  KeyValuePair<string, List<SugarParameter>>(sql,parametres.ToList()));
+        }
+        public static string GetSqlString(ConnectionConfig connectionConfig,KeyValuePair<string, List<SugarParameter>> sqlObj)
+        {
+            var result = sqlObj.Key;
+            if (sqlObj.Value != null)
+            {
+                foreach (var item in sqlObj.Value.OrderByDescending(it => it.ParameterName.Length))
+                {
+                    if (connectionConfig.MoreSettings == null) 
+                    {
+                        connectionConfig.MoreSettings = new ConnMoreSettings();
+                    }
+                    if (item.Value != null && item.Value is DateTime &&((DateTime)item.Value==DateTime.MinValue)) 
+                    {
+                        item.Value = connectionConfig.MoreSettings.DbMinDate;
+                    }
+                    if (item.Value == null || item.Value == DBNull.Value)
+                    {
+                        result = result.Replace(item.ParameterName, "null");
+                    }
+                    else if (UtilMethods.IsNumber(item.Value.GetType().Name))
+                    {
+                        result = result.Replace(item.ParameterName, item.Value.ObjToString());
+                    }
+                    else if (item.Value is byte[])
+                    {
+                        result = result.Replace(item.ParameterName, "0x" + BitConverter.ToString((byte[])item.Value));
+                    }
+                    else if (item.Value is bool)
+                    {
+                        if (connectionConfig.DbType == DbType.PostgreSQL)
+                        {
+                            result = result.Replace(item.ParameterName, (Convert.ToBoolean(item.Value) ? "true": "false")  );
+                        }
+                        else
+                        {
+                            result = result.Replace(item.ParameterName, (Convert.ToBoolean(item.Value) ? 1 : 0) + "");
+                        }
+                    }
+                    else if (item.Value.GetType() != UtilConstants.StringType && connectionConfig.DbType == DbType.PostgreSQL && PostgreSQLDbBind.MappingTypesConst.Any(x => x.Value.ToString().EqualCase(item.Value.GetType().Name)))
+                    {
+                        var type = PostgreSQLDbBind.MappingTypesConst.First(x => x.Value.ToString().EqualCase(item.Value.GetType().Name)).Key;
+                        var replaceValue = string.Format("CAST('{0}' AS {1})", item.Value, type);
+                        result = result.Replace(item.ParameterName, replaceValue);
+                    }
+                    else if (connectionConfig.MoreSettings?.DisableNvarchar == true || item.DbType == System.Data.DbType.AnsiString || connectionConfig.DbType == DbType.Sqlite)
+                    {
+                        result = result.Replace(item.ParameterName, $"'{item.Value.ObjToString()}'");
+                    }
+                    else
+                    {
+                        result = result.Replace(item.ParameterName, $"N'{item.Value.ObjToString()}'");
+                    }
+                }
+            }
+
+            return result;
         }
     }
 }

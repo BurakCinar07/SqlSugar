@@ -25,7 +25,7 @@ namespace SqlSugar
                     whereList.Add(whereString);
                 }
                 i++;
-                return string.Format("{0} {1} WHERE {2};", updateTable, setValues, string.Join("AND", whereList));
+                return string.Format("{0} {1} WHERE {2};", updateTable, setValues, string.Join(" AND", whereList));
             }).ToArray()));
             return sb.ToString();
         }
@@ -47,11 +47,18 @@ namespace SqlSugar
                 if (type == UtilConstants.DateType && iswhere == false)
                 {
                     var date = value.ObjToDate();
-                    if (date < Convert.ToDateTime("1900-1-1"))
+                    if (date < UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig))
                     {
-                        date = Convert.ToDateTime("1900-1-1");
+                        date = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
                     }
-                    return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+                    if (this.Context.CurrentConnectionConfig?.MoreSettings?.DisableMillisecond == true)
+                    {
+                        return "'" + date.ToString("yyyy-MM-dd HH:mm:ss") + "'";
+                    }
+                    else 
+                    {
+                        return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+                    }
                 }
                 else if (type == UtilConstants.DateType && iswhere) 
                 {
