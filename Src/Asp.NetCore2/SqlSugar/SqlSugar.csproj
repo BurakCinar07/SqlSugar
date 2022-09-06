@@ -2,12 +2,12 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
-    <Version>5.0.9.1</Version>
+    <Version>1.1.3</Version>
     <Copyright>sun_kai_xuan</Copyright>
-    <PackageProjectUrl>https://github.com/sunkaixuan/SqlSugar</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/BurakCinar07/SqlSugar</PackageProjectUrl>
     <PackageLicenseUrl></PackageLicenseUrl>
     <PackageIconUrl></PackageIconUrl>
-    <PackageId>SqlSugar</PackageId>
+    <PackageId>MgaSqlSugar</PackageId>
     <Description>果糖大数据科技（南通）有限公司</Description>
     <Company>果糖大数据科技（南通）有限公司</Company>
     <Authors>果糖大数据科技（南通）有限公司</Authors>

@@ -633,7 +633,7 @@ namespace SqlSugar
                     {
                         colType = colType.GetGenericArguments()[0];
                     }
-                    result.Columns.Add(pi.Name, colType);
+                    result.Columns.Add(pi.GetCustomAttribute<SugarColumn>().ColumnName, colType);
                 }
                 for (int i = 0; i < list.Count; i++)
                 {
