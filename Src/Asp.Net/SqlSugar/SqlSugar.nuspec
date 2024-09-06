@@ -2,7 +2,7 @@
 <package >
   <metadata>
     <id>SqlSugar</id>
-    <version>5.0.9.1</version>
+    <version>5.1.4.167</version>
     <title>.Net Framework 安装此版本, 5.0.3.3-max  最低要求 .Net Framework 4.6 | 5.0.0.2-5.0.3.2 最低要求 .Net Framework 4.5  |  4.0-4.9.11 最低要求 .Net Framework 4.0+  .NET ORM </title>
     <authors>sun kaixuan</authors>
     <owners>landa</owners>
@@ -15,6 +15,6 @@
     <tags>asp.net orm</tags>
   </metadata>
   <files>
-         <file src="C:\Nuget\SqlSugar.dll" target="lib"></file>
+         <file src="G:\Git\SqlSugar\Src\Asp.Net\SqlSugar\bin\Debug\SqlSugar.dll" target="lib"></file>
   </files>
 </package>

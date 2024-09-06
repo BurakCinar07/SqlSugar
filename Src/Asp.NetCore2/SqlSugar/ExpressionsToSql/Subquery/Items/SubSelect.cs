@@ -43,26 +43,34 @@ namespace SqlSugar
         public string GetValue(Expression expression = null)
         {
             var exp = expression as MethodCallExpression;
-            var entityType = (exp.Arguments[0] as LambdaExpression).Parameters[0].Type;
-            if (this.Context.InitMappingInfo != null)
-            {
-                this.Context.InitMappingInfo(entityType);
-                this.Context.RefreshMapping();
-            }
+            InitType(exp);
             var result = "";
-            if (this.Context.JoinIndex == 0)
-                result = SubTools.GetMethodValue(this.Context, exp.Arguments[0], ResolveExpressType.FieldSingle);
-            else
-                result = SubTools.GetMethodValue(this.Context, exp.Arguments[0], ResolveExpressType.FieldMultiple);
+
+            var oldIsSingle = this.Context.IsSingle;
+            this.Context.IsSingle = false;
+            result = SubTools.GetMethodValue(this.Context, exp.Arguments[0], ResolveExpressType.FieldMultiple);
+            this.Context.IsSingle = oldIsSingle;
 
             SetShortName(exp, result);
 
             return result;
         }
 
+        private void InitType(MethodCallExpression exp)
+        {
+            foreach (var arg in (exp.Arguments[0] as LambdaExpression).Parameters) 
+            {
+                if (this.Context.InitMappingInfo != null)
+                {
+                    this.Context.InitMappingInfo(arg.Type);
+                    this.Context.RefreshMapping();
+                }
+            }
+        }
+
         public void SetShortName(MethodCallExpression exp, string result)
         {
-            if (exp.Arguments[0] is LambdaExpression && result.IsContainsIn("+", "-","*","/"))
+            if (exp.Arguments[0] is LambdaExpression)
             {
                 var parameters = (exp.Arguments[0] as LambdaExpression).Parameters;
                 if (parameters != null && parameters.Count > 0)
@@ -74,7 +82,7 @@ namespace SqlSugar
         }
         public void SetShortNameNext(MethodCallExpression exp, string result)
         {
-            if (exp.Arguments.Count>1&&exp.Arguments[1] is LambdaExpression && result.IsContainsIn("+", "-", "*", "/"))
+            if (exp.Arguments.Count>1&&exp.Arguments[1] is LambdaExpression )
             {
                 var parameters = (exp.Arguments[1] as LambdaExpression).Parameters;
                 if (parameters != null && parameters.Count > 0)

@@ -7,6 +7,16 @@ namespace SqlSugar
 {
     public class PostgreSQLCodeFirst : CodeFirstProvider
     {
+        protected override void ExistLogicEnd(List<EntityColumnInfo> dbColumns)
+        {
+            foreach (EntityColumnInfo column in dbColumns) 
+            {
+                if (column.DefaultValue != null) 
+                {
+                    this.Context.DbMaintenance.AddDefaultValue(column.DbTableName,column.DbColumnName,column.DefaultValue.ToSqlValue());
+                }
+            }
+        }
         public override void NoExistLogic(EntityInfo entityInfo)
         {
             var tableName = GetTableName(entityInfo);
@@ -18,6 +28,10 @@ namespace SqlSugar
                 {
                     DbColumnInfo dbColumnInfo = this.EntityColumnToDbColumn(entityInfo, tableName, item);
                     columns.Add(dbColumnInfo);
+                }
+                if (entityInfo.IsCreateTableFiledSort)
+                {
+                    columns = columns.OrderBy(c => c.CreateTableFieldSort).ToList();
                 }
             }
             columns = columns.OrderBy(it => it.IsPrimarykey ? 0 : 1).ToList();
@@ -36,7 +50,8 @@ namespace SqlSugar
                 IsNullable = item.IsNullable,
                 DefaultValue = item.DefaultValue,
                 ColumnDescription = item.ColumnDescription,
-                Length = item.Length
+                Length = item.Length,
+                CreateTableFieldSort = item.CreateTableFieldSort
             };
             if (propertyType == UtilConstants.DecType) 
             {

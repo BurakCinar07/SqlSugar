@@ -26,6 +26,16 @@ namespace SqlSugar
                  ";
             }
         }
+        protected override string GetJoinUpdate(string columnsString, ref string whereString)
+        {
+            var joinString = $"  {Builder.GetTranslationColumnName(this.TableName)}  {Builder.GetTranslationColumnName(this.ShortName)} ";
+            foreach (var item in this.JoinInfos)
+            {
+                joinString += $"\r\n JOIN {Builder.GetTranslationColumnName(item.TableName)}  {Builder.GetTranslationColumnName(item.ShortName)} ON {item.JoinWhere} ";
+            }
+            var tableName =   joinString+ "\r\n ";
+            return string.Format(SqlTemplate, tableName, columnsString, whereString);
+        }
         protected override string TomultipleSqlString(List<IGrouping<int, DbColumnInfo>> groupList)
         {
             Check.Exception(PrimaryKeys == null || PrimaryKeys.Count == 0, " Update List<T> need Primary key");
@@ -59,7 +69,7 @@ namespace SqlSugar
                     {
                         updateTable.Append(SqlTemplateBatchUnion);
                     }
-                    updateTable.Append("\r\n SELECT " + string.Join(",", columns.Select(it => string.Format(SqlTemplateBatchSelect, FormatValue(it.Value,it.PropertyName),this.Builder.GetTranslationColumnName(it.DbColumnName)))));
+                    updateTable.Append("\r\n SELECT " + string.Join(",", columns.Select(it => string.Format(SqlTemplateBatchSelect, base.GetDbColumn(it,FormatValue(it.Value,it.PropertyName)),this.Builder.GetTranslationColumnName(it.DbColumnName)))));
                     ++i;
                 }
                 pageIndex++;
@@ -87,7 +97,31 @@ namespace SqlSugar
                 batchUpdateSql.Replace("${0}",format);
                 batchUpdateSql.Append(";");
             }
+            batchUpdateSql = GetBatchUpdateSql(batchUpdateSql);
             return batchUpdateSql.ToString();
+        }
+
+        private StringBuilder GetBatchUpdateSql(StringBuilder batchUpdateSql)
+        {
+            if (ReSetValueBySqlExpListType == null && ReSetValueBySqlExpList != null)
+            {
+                var result = batchUpdateSql.ToString();
+                foreach (var item in ReSetValueBySqlExpList)
+                {
+                    var dbColumnName = item.Value.DbColumnName;
+                    if (item.Value.Type == ReSetValueBySqlExpListModelType.List)
+                    {
+                        result = result.Replace($"T.{dbColumnName}",   "S." + dbColumnName+item.Value.Sql+ "T." + dbColumnName);
+                    }
+                    else
+                    {
+                        result = result.Replace($"T.{dbColumnName}", item.Value.Sql.Replace(dbColumnName, "S." + dbColumnName));
+                    }
+                    batchUpdateSql = new StringBuilder(result);
+                }
+            }
+
+            return batchUpdateSql;
         }
         int i = 0;
         public  object FormatValue(object value,string name)
@@ -106,16 +140,19 @@ namespace SqlSugar
                 var type = UtilMethods.GetUnderType(value.GetType());
                 if (type == UtilConstants.DateType)
                 {
-                    var date = value.ObjToDate();
-                    if (date < UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig))
-                    {
-                        date = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
-                    }
-                    return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+                    return GetDateTimeString(value);
+                }
+                else if (value is DateTimeOffset)
+                {
+                    return GetDateTimeOffsetString(value);
                 }
                 else if (type == UtilConstants.ByteArrayType)
                 {
                     string bytesString = "0x" + BitConverter.ToString((byte[])value).Replace("-", "");
+                    if (bytesString == "0x")
+                    {
+                        bytesString = "''";
+                    }
                     return bytesString;
                 }
                 else if (type.IsEnum())
@@ -136,7 +173,7 @@ namespace SqlSugar
                 else if (type == UtilConstants.IntType)
                 {
                     return GetString(value);
-                }
+                } 
                 else if (type == UtilConstants.BoolType)
                 {
                     return value.ObjToBool() ? "1" : "0";
@@ -144,16 +181,37 @@ namespace SqlSugar
                 else if (type == UtilConstants.StringType || type == UtilConstants.ObjType)
                 {
                     ++i;
-                    var parameterName = this.Builder.SqlParameterKeyWord + name + i;
+                    var parameterName = this.Builder.SqlParameterKeyWord + name + "_" + i;
                     this.Parameters.Add(new SugarParameter(parameterName, value));
                     return parameterName;
                 }
                 else
                 {
-                    return n+"'" + GetString(value) + "'";
+                    return n + "'" + GetString(value) + "'";
                 }
             }
         }
+
+        private object GetDateTimeString(object value)
+        {
+            var date = value.ObjToDate();
+            if (date < UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig))
+            {
+                date = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
+            }
+            return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+        }
+
+        private object GetDateTimeOffsetString(object value)
+        {
+            var date = UtilMethods.ConvertFromDateTimeOffset((DateTimeOffset)value);
+            if (date < UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig))
+            {
+                date = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
+            }
+            return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+        }
+
         private string GetString(object value)
         {
             var result = value.ToString();

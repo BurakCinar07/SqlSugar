@@ -8,14 +8,19 @@ namespace SqlSugar
 {
     public class OracleUpdateBuilder : UpdateBuilder
     {
+        public override string ReSetValueBySqlExpListType { get; set; } = "oracle";
         protected override string TomultipleSqlString(List<IGrouping<int, DbColumnInfo>> groupList)
         {
+            if (groupList.Count == 0)
+            {
+                return " select 0 from dual";
+            }
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("Begin");
             sb.AppendLine(string.Join("\r\n", groupList.Select(t =>
             {
                 var updateTable = string.Format("UPDATE {0} SET", base.GetTableNameStringNoWith);
-                var setValues = string.Join(",", t.Where(s => !s.IsPrimarykey).Select(m => GetOracleUpdateColums(m)).ToArray());
+                var setValues = string.Join(",", t.Where(s => !s.IsPrimarykey).Where(s => OldPrimaryKeys == null || !OldPrimaryKeys.Contains(s.DbColumnName)).Select(m => GetOracleUpdateColums(m)).ToArray());
                 var pkList = t.Where(s => s.IsPrimarykey).ToList();
                 List<string> whereList = new List<string>();
                 foreach (var item in pkList)
@@ -33,7 +38,7 @@ namespace SqlSugar
 
         private string GetOracleUpdateColums(DbColumnInfo m)
         {
-            return string.Format("\"{0}\"={1}", m.DbColumnName.ToUpper(), FormatValue(m.Value,m.IsPrimarykey,m.PropertyName));
+            return string.Format("\"{0}\"={1} ", m.DbColumnName.ToUpper(IsUppper), base.GetDbColumn(m,FormatValue(m.Value,m.IsPrimarykey,m.PropertyName)));
         }
         int i = 0;
         public  object FormatValue(object value,bool isPrimaryKey,string name)
@@ -112,5 +117,32 @@ namespace SqlSugar
                 }
             }
         }
+        protected override string GetJoinUpdate(string columnsString, ref string whereString)
+        {
+            var joinString = $"  {Builder.GetTranslationColumnName(this.TableName)}  {Builder.GetTranslationColumnName(this.ShortName)} ";
+            foreach (var item in this.JoinInfos)
+            {
+                joinString += $"\r\n USING {Builder.GetTranslationColumnName(item.TableName)}  {Builder.GetTranslationColumnName(item.ShortName)} ON {item.JoinWhere} ";
+            }
+            var tableName = joinString + "\r\n ";
+            var newTemp = SqlTemplate.Replace("UPDATE", "MERGE INTO").Replace("SET", "WHEN MATCHED THEN \r\nUPDATE SET");
+            return string.Format(newTemp, tableName, columnsString, whereString);
+        }
+        #region Helper
+        public bool IsUppper
+        {
+            get
+            {
+                if (this.Context.CurrentConnectionConfig.MoreSettings == null)
+                {
+                    return true;
+                }
+                else
+                {
+                    return this.Context.CurrentConnectionConfig.MoreSettings.IsAutoToUpper == true;
+                }
+            }
+        }
+        #endregion
     }
 }

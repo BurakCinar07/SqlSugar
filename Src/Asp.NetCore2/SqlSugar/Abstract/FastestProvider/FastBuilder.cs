@@ -9,7 +9,9 @@ namespace SqlSugar
 {
     public class FastBuilder 
     {
+        public EntityInfo FastEntityInfo { get; set; }
         public virtual bool IsActionUpdateColumns { get; set; }
+        public virtual DbFastestProperties DbFastestProperties { get; set; }
         public SqlSugarProvider Context { get; set; }
         public virtual string CharacterSet { get; set; }
         public virtual string UpdateSql { get; set; } = @"UPDATE TM
@@ -39,10 +41,24 @@ namespace SqlSugar
 
         public virtual async Task CreateTempAsync<T>(DataTable dt) where T : class, new()
         {
+            var sqlbuilder = this.Context.Queryable<object>().SqlBuilder;
             await this.Context.UnionAll(
-                this.Context.Queryable<T>().Select("*").Where(it => false).AS(dt.TableName),
-                this.Context.Queryable<T>().Select("*").Where(it => false).AS(dt.TableName)).Select("top 1 * into #temp").ToListAsync();
+                this.Context.Queryable<T>().Filter(null,true).Select(string.Join(",", dt.Columns.Cast<DataColumn>().Select(it => sqlbuilder.GetTranslationColumnName(it.ColumnName)))).Where(it => false).AS(dt.TableName),
+                this.Context.Queryable<T>().Filter(null, true).Select(string.Join(",", dt.Columns.Cast<DataColumn>().Select(it => sqlbuilder.GetTranslationColumnName(it.ColumnName)))).Where(it => false).AS(dt.TableName)).Select("top 1 * into #temp").ToListAsync();
             dt.TableName = "#temp";
+        }
+
+        public async virtual Task<int> Merge<T>(string tableName,DataTable dt, EntityInfo entityInfo, string[] whereColumns, string[] updateColumns, List<T> datas) where T : class, new()
+        {
+            var result = 0;
+            await this.Context.Utilities.PageEachAsync(datas,2000,async pageItems =>
+            {
+                var x = await this.Context.Storageable(pageItems).As(tableName).WhereColumns(whereColumns).ToStorageAsync();
+                result += await x.BulkCopyAsync();
+                result += await x.BulkUpdateAsync(updateColumns);
+                return result;
+            });
+            return result;
         }
     }
 }

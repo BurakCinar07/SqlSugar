@@ -2,16 +2,30 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace SqlSugar
 {
     public abstract partial class DbMaintenanceProvider : IDbMaintenance
     {
         #region DML
+        public List<string> GetProcList() 
+        {
+            return GetProcList(this.Context.Ado.Connection.Database);
+        }
+        public virtual List<string> GetProcList(string dbName) 
+        {
+            return new List<string>();
+        }
         public virtual List<string> GetDataBaseList(SqlSugarClient db)
         {
             return db.Ado.SqlQuery<string>(this.GetDataBaseSql);
+        }
+        public virtual List<string> GetDataBaseList()
+        {
+            return this.Context.Ado.SqlQuery<string>(this.GetDataBaseSql);
         }
         public virtual List<DbTableInfo> GetViewInfoList(bool isCache = true)
         {
@@ -28,6 +42,18 @@ namespace SqlSugar
             }
             return result;
         }
+        public List<DbTableInfo> GetTableInfoList(Func<DbType,string, string> getChangeSqlFunc)
+        { 
+            var db=this.Context.CopyNew();
+            db.CurrentConnectionConfig.IsAutoCloseConnection = true;
+            db.Aop.OnExecutingChangeSql = (sql, pars) =>
+            {
+                sql= getChangeSqlFunc(this.Context.CurrentConnectionConfig.DbType, sql);
+                return new KeyValuePair<string, SugarParameter[]>(sql,pars);
+            };
+            var result= db.DbMaintenance.GetTableInfoList(false);
+            return result;
+        }
         public virtual List<DbTableInfo> GetTableInfoList(bool isCache = true)
         {
             string cacheKey = "DbMaintenanceProvider.GetTableInfoList"+this.Context.CurrentConnectionConfig.ConfigId;
@@ -41,6 +67,18 @@ namespace SqlSugar
             {
                 item.DbObjectType = DbObjectType.Table;
             }
+            return result;
+        }
+        public List<DbColumnInfo> GetColumnInfosByTableName(string tableName, Func<DbType, string, string> getChangeSqlFunc) 
+        {
+            var db = this.Context.CopyNew();
+            db.CurrentConnectionConfig.IsAutoCloseConnection = true;
+            db.Aop.OnExecutingChangeSql = (sql, pars) =>
+            {
+                sql = getChangeSqlFunc(this.Context.CurrentConnectionConfig.DbType, sql);
+                return new KeyValuePair<string, SugarParameter[]>(sql, pars);
+            };
+            var result = db.DbMaintenance.GetColumnInfosByTableName(tableName,false);
             return result;
         }
         public virtual List<DbColumnInfo> GetColumnInfosByTableName(string tableName, bool isCache = true)
@@ -75,6 +113,22 @@ namespace SqlSugar
                  return result.Select(it => it.DbColumnName).ToList();
              });
         }
+        public virtual List<string> GetIndexList(string tableName) 
+        {
+            return new List<string>();
+        }
+        public virtual List<string> GetFuncList() 
+        {
+            return new List<string>();
+        }
+        public virtual List<string> GetTriggerNames(string tableName) 
+        {
+            return new List<string>();
+        }
+        public virtual List<string> GetDbTypes() 
+        {
+            return new List<string>();
+        }
         #endregion
 
         #region Check
@@ -104,6 +158,16 @@ namespace SqlSugar
             var columns = GetColumnInfosByTableName(tableName);
             if (columns.IsNullOrEmpty()) return false;
             var result=columns.Any(it => it.IsPrimarykey == true && it.DbColumnName.Equals(columnName, StringComparison.CurrentCultureIgnoreCase));
+            return result;
+        }
+        public virtual bool IsPrimaryKey(string tableName, string columnName,bool isCache=true)
+        {
+            columnName = this.SqlBuilder.GetNoTranslationColumnName(columnName);
+            var isAny = IsAnyTable(tableName, isCache);
+            Check.Exception(!isAny, string.Format("Table {0} does not exist", tableName));
+            var columns = GetColumnInfosByTableName(tableName,isCache);
+            if (columns.IsNullOrEmpty()) return false;
+            var result = columns.Any(it => it.IsPrimarykey == true && it.DbColumnName.Equals(columnName, StringComparison.CurrentCultureIgnoreCase));
             return result;
         }
         public virtual bool IsIdentity(string tableName, string columnName)
@@ -139,6 +203,47 @@ namespace SqlSugar
         #endregion
 
         #region DDL
+        public virtual bool  SetAutoIncrementInitialValue(string tableName,int initialValue) 
+        {
+            Console.WriteLine("no support");
+            return true;
+        }
+        public virtual bool SetAutoIncrementInitialValue(Type entityType, int initialValue)
+        {
+            Console.WriteLine("no support");
+            return true;
+        }
+        public  virtual bool DropIndex(string indexName)
+        {
+            indexName = this.SqlBuilder.GetNoTranslationColumnName(indexName);
+            this.Context.Ado.ExecuteCommand($" DROP INDEX  {indexName} ");
+            return true;
+        }
+        public virtual bool DropIndex(string indexName,string tableName)
+        {
+            indexName = this.SqlBuilder.GetNoTranslationColumnName(indexName);
+            tableName= this.SqlBuilder.GetNoTranslationColumnName(tableName);
+            this.Context.Ado.ExecuteCommand($" DROP INDEX  {indexName}  ON {tableName}");
+            return true;
+        }
+        public virtual bool DropView(string viewName) 
+        {
+            viewName = this.SqlBuilder.GetNoTranslationColumnName(viewName);
+            this.Context.Ado.ExecuteCommand($" DROP VIEW {viewName} ");
+            return true;
+        }
+        public virtual bool DropFunction(string funcName) 
+        {
+            funcName = this.SqlBuilder.GetNoTranslationColumnName(funcName);
+            this.Context.Ado.ExecuteCommand($" DROP FUNCTION  {funcName} ");
+            return true;
+        }
+        public virtual bool DropProc(string procName) 
+        {
+            procName = this.SqlBuilder.GetNoTranslationColumnName(procName);
+            this.Context.Ado.ExecuteCommand($" DROP PROCEDURE  {procName} ");
+            return true;
+        }
         /// <summary>
         ///by current connection string
         /// </summary>
@@ -170,7 +275,16 @@ namespace SqlSugar
         {
             tableName = this.SqlBuilder.GetTranslationTableName(tableName);
             columnName = this.SqlBuilder.GetTranslationTableName(columnName);
-            string sql = string.Format(this.AddPrimaryKeySql, tableName, string.Format("PK_{0}_{1}", this.SqlBuilder.GetNoTranslationColumnName(tableName), this.SqlBuilder.GetNoTranslationColumnName(columnName)), columnName);
+            var temp = "PK_{0}_{1}";
+            if (tableName.IsContainsIn(" ", "-")) 
+            {
+                temp = SqlBuilder.GetTranslationColumnName(temp);
+            }
+            string sql = string.Format(this.AddPrimaryKeySql, tableName, string.Format(temp, this.SqlBuilder.GetNoTranslationColumnName(tableName).Replace("-","_"), this.SqlBuilder.GetNoTranslationColumnName(columnName)), columnName);
+            if ((tableName+columnName).Length>25 &&this.Context?.CurrentConnectionConfig?.MoreSettings?.MaxParameterNameLength > 0) 
+            {
+                sql = string.Format(this.AddPrimaryKeySql, tableName, string.Format(temp, this.SqlBuilder.GetNoTranslationColumnName(tableName).GetNonNegativeHashCodeString(), "Id"), columnName);
+            }
             this.Context.Ado.ExecuteCommand(sql);
             return true;
         }
@@ -180,6 +294,10 @@ namespace SqlSugar
             tableName = this.SqlBuilder.GetTranslationTableName(tableName);
             var columnName = string.Join(",", columnNames);
             var pkName = string.Format("PK_{0}_{1}", this.SqlBuilder.GetNoTranslationColumnName(tableName), columnName.Replace(",","_"));
+            if (pkName.Length > 25 && this.Context?.CurrentConnectionConfig?.MoreSettings?.MaxParameterNameLength > 0)
+            {
+                pkName = "PK_" + pkName.GetNonNegativeHashCodeString();
+            }
             string sql = string.Format(this.AddPrimaryKeySql, tableName,pkName, columnName);
             this.Context.Ado.ExecuteCommand(sql);
             return true;
@@ -206,21 +324,66 @@ namespace SqlSugar
             this.Context.Ado.ExecuteCommand(sql);
             if (isAddNotNUll) 
             {
+                if (columnInfo.TableName == null) 
+                {
+                    columnInfo.TableName= tableName;
+                }
                 var dtColums = this.Context.Queryable<object>().AS(columnInfo.TableName).Where("1=2")
                     .Select(this.SqlBuilder.GetTranslationColumnName(columnInfo.DbColumnName)).ToDataTable().Columns.Cast<System.Data.DataColumn>();
                 var dtColumInfo = dtColums.First(it => it.ColumnName.EqualCase(columnInfo.DbColumnName));
                 var type = UtilMethods.GetUnderType(dtColumInfo.DataType);
                 var value= type==UtilConstants.StringType?(object)"": Activator.CreateInstance(type);
+                if (this.Context.CurrentConnectionConfig.DbType == DbType.Oracle)
+                {
+                    value = columnInfo.DefaultValue;
+                    if (value.Equals("")) 
+                    {
+                        value = "empty";
+                    }
+                }
+                value = GetDefaultValue(columnInfo, value);
                 var dt = new Dictionary<string, object>();
                 dt.Add(columnInfo.DbColumnName, value);
-                this.Context.Updateable(dt)
-                             .AS(tableName)
-                             .Where($"{columnInfo.DbColumnName} is null ").ExecuteCommand();
-                if(this.Context.CurrentConnectionConfig.DbType!=DbType.Oracle)
-                   columnInfo.IsNullable = false;
+                if (columnInfo.DataType.EqualCase("json") && columnInfo.DefaultValue?.Contains("}") == true)
+                {
+                    {
+                        dt[columnInfo.DbColumnName] = "{}";
+                        var sqlobj = this.Context.Updateable(dt)
+                        .AS(tableName)
+                        .Where($"{this.SqlBuilder.GetTranslationColumnName(columnInfo.DbColumnName)} is null ").ToSql();
+                        sqlobj.Value[0].IsJson = true;
+                        this.Context.Ado.ExecuteCommand(sqlobj.Key, sqlobj.Value);
+                    }
+                }
+                else if (columnInfo.DataType.EqualCase("json") && columnInfo.DefaultValue?.Contains("]") == true)
+                {
+                    {
+                        dt[columnInfo.DbColumnName] = "[]";
+                        var sqlobj = this.Context.Updateable(dt)
+                        .AS(tableName)
+                        .Where($"{this.SqlBuilder.GetTranslationColumnName(columnInfo.DbColumnName)} is null ").ToSql();
+                        sqlobj.Value[0].IsJson = true;
+                        this.Context.Ado.ExecuteCommand(sqlobj.Key, sqlobj.Value);
+                    }
+                }
+                else
+                {
+                    this.Context.Updateable(dt)
+                                 .AS(tableName)
+                                 .Where($"{this.SqlBuilder.GetTranslationColumnName(columnInfo.DbColumnName)} is null ").ExecuteCommand();
+                }
+                columnInfo.IsNullable = false;
                 UpdateColumn(tableName, columnInfo);
             }
             return true;
+        }
+        public virtual object GetDefaultValue(DbColumnInfo columnInfo, object value)
+        {
+            if (columnInfo.DataType.ObjToString().ToLower().IsIn("varchar", "nvarchar", "varchar2", "nvarchar2") && !string.IsNullOrEmpty(columnInfo.DefaultValue) && Regex.IsMatch(columnInfo.DefaultValue, @"^\w+$"))
+            {
+                value = columnInfo.DefaultValue;
+            }
+            return value;
         }
         public virtual bool UpdateColumn(string tableName, DbColumnInfo column)
         {
@@ -235,12 +398,78 @@ namespace SqlSugar
             tableName = this.SqlBuilder.GetTranslationTableName(tableName);
             this.Context.Ado.ExecuteCommand(string.Format(this.DropTableSql, tableName));
             return true;
+        }       
+        public virtual bool DropTable(string[] tableName)
+        {
+            foreach (var item in tableName)
+            {
+                DropTable(item);
+            }
+            return true;
         }
-
+        public virtual bool DropTable(Type[] tableEnittyTypes)
+        {
+            foreach (var item in tableEnittyTypes)
+            {
+                var tableName = this.Context.EntityMaintenance.GetTableName(item);
+                DropTable(tableName);
+            }
+            return true;
+        }
+        public virtual bool DropTable<T>() 
+        {
+            if (typeof(T).GetCustomAttribute<SplitTableAttribute>() != null)
+            {
+                var tables = this.Context.SplitHelper(typeof(T)).GetTables();
+                foreach (var item in tables)
+                {
+                    this.Context.DbMaintenance.DropTable(SqlBuilder.GetTranslationColumnName(item.TableName));
+                }
+                return true;
+            }
+            else
+            {
+                var tableName = this.Context.EntityMaintenance.GetTableName<T>();
+                return DropTable(tableName);
+            }
+        }
+        public virtual bool DropTable<T,T2>()
+        {
+            DropTable<T>();
+            DropTable<T2>();
+            return true;
+        }
+        public virtual bool DropTable<T, T2,T3>()
+        {
+            DropTable<T>();
+            DropTable<T2>();
+            DropTable<T3>();
+            return true;
+        }
+        public virtual bool DropTable<T, T2, T3,T4>()
+        {
+            DropTable<T>();
+            DropTable<T2>();
+            DropTable<T3>();
+            DropTable<T4>();
+            return true;
+        }
         public virtual bool TruncateTable<T>()
         {
-            this.Context.InitMappingInfo<T>();
-            return this.TruncateTable(this.Context.EntityMaintenance.GetEntityInfo<T>().DbTableName);
+            if (typeof(T).GetCustomAttribute<SplitTableAttribute>() != null)
+            {
+                var tables = this.Context.SplitHelper(typeof(T)).GetTables();
+                foreach (var item in tables)
+                {
+                    this.Context.DbMaintenance.TruncateTable(SqlBuilder.GetTranslationColumnName(item.TableName));
+                }
+                return true;
+            }
+            else
+            {
+                this.Context.InitMappingInfo<T>();
+                return this.TruncateTable(this.Context.EntityMaintenance.GetEntityInfo<T>().DbTableName);
+            }
         }
         public virtual bool TruncateTable<T,T2>()
         {
@@ -263,6 +492,15 @@ namespace SqlSugar
             TruncateTable<T4>();
             return true;
         }
+        public virtual bool TruncateTable<T, T2, T3, T4,T5>()
+        {
+            TruncateTable<T>();
+            TruncateTable<T2>();
+            TruncateTable<T3>();
+            TruncateTable<T4>();
+            TruncateTable<T5>();
+            return true;
+        }
         public virtual bool DropColumn(string tableName, string columnName)
         {
             columnName = this.SqlBuilder.GetTranslationColumnName(columnName);
@@ -281,6 +519,23 @@ namespace SqlSugar
         {
             tableName = this.SqlBuilder.GetTranslationTableName(tableName);
             this.Context.Ado.ExecuteCommand(string.Format(this.TruncateTableSql, tableName));
+            return true;
+        }
+        public bool TruncateTable(params string[] tableNames) 
+        {
+            foreach (var item in tableNames)
+            {
+                TruncateTable(item);
+            }
+            return true;
+        }
+        public bool TruncateTable(params Type[] tableEnittyTypes)
+        {
+            foreach (var item in tableEnittyTypes)
+            {
+                var name = this.Context.EntityMaintenance.GetTableName(item);
+                TruncateTable(name);
+            }
             return true;
         }
         public virtual bool BackupDataBase(string databaseName, string fullFileName)
@@ -352,6 +607,18 @@ namespace SqlSugar
             {
                 defaultValue = "";
             }
+            if (defaultValue.IsDate() && !AddDefaultValueSql.Contains("'{2}'")) 
+            {
+                defaultValue = "'" + defaultValue + "'";
+            }
+            if (defaultValue != null && defaultValue.EqualCase("'current_timestamp'")) 
+            {
+                defaultValue = defaultValue.TrimEnd('\'').TrimStart('\'');
+            }
+            if (defaultValue != null && defaultValue.EqualCase("'current_date'"))
+            {
+                defaultValue = defaultValue.TrimEnd('\'').TrimStart('\'');
+            }
             string sql = string.Format(AddDefaultValueSql, tableName, columnName,defaultValue);
             this.Context.Ado.ExecuteCommand(sql);
             return true;
@@ -378,13 +645,26 @@ namespace SqlSugar
         }
         public virtual bool CreateIndex(string tableName, string[] columnNames, string IndexName, bool isUnique = false) 
         {
-            string sql = string.Format("CREATE {3} INDEX {2} ON {0}({1})", tableName, string.Join(",", columnNames), IndexName, isUnique ? "UNIQUE" : "");
+            var include = "";
+            if (IndexName.ToLower().Contains("{include:"))
+            {
+                include = Regex.Match(IndexName, @"\{include\:.+$").Value;
+                IndexName = IndexName.Replace(include, "");
+                if (include == null) 
+                {
+                    throw new Exception("include format error");
+                }
+                include = include.Replace("{include:", "").Replace("}", "");
+                include = $"include({include})";
+            }
+            string sql = string.Format("CREATE {3} INDEX {2} ON {0}({1})"+ include, this.SqlBuilder.GetTranslationColumnName(tableName) , string.Join(",", columnNames), IndexName, isUnique ? "UNIQUE" : "");
             this.Context.Ado.ExecuteCommand(sql);
             return true;
         }
         public virtual bool IsAnyIndex(string indexName)
         {
-            string sql = string.Format(this.IsAnyIndexSql, indexName);
+            //string sql = string.Format(this.IsAnyIndexSql, indexName);
+            string sql = string.Format(this.IsAnyIndexSql, indexName, this.Context.Ado.Connection.Database);
             return this.Context.Ado.GetInt(sql)>0;
         }
         public virtual bool AddRemark(EntityInfo entity)
@@ -495,9 +775,17 @@ namespace SqlSugar
             this.Context.Ado.ExecuteCommand(sql);
             return true;
         }
+        public virtual bool IsAnyProcedure(string procName) {
+            string sql = string.Format(this.IsAnyProcedureSql, procName);
+            return  this.Context.Ado.GetInt(sql)>0;
+        }
         #endregion
 
         #region Private
+        public virtual List<DbTableInfo> GetSchemaTables(EntityInfo entityInfo) 
+        {
+            return null;
+        }
         protected List<T> GetListOrCache<T>(string cacheKey, string sql)
         {
             return this.Context.Utilities.GetReflectionInoCacheInstance().GetOrCreate(cacheKey,
@@ -533,6 +821,12 @@ namespace SqlSugar
             string columnName = this.SqlBuilder.GetTranslationColumnName(columnInfo.DbColumnName);
             tableName = this.SqlBuilder.GetTranslationTableName(tableName);
             string dataType = columnInfo.DataType;
+            if (dataType.EqualCase("varchar")
+                &&this.Context.CurrentConnectionConfig?.MoreSettings?.SqlServerCodeFirstNvarchar == true
+                &&this.Context.CurrentConnectionConfig?.DbType == DbType.SqlServer) 
+            {
+                dataType = "nvarchar";
+            }
             string dataSize = GetSize(columnInfo);
             string nullType = columnInfo.IsNullable ? this.CreateTableNull : CreateTableNotNull;
             string primaryKey = null;

@@ -38,18 +38,53 @@ namespace SqlSugar
             if (result.Contains("(") && result.Contains(")"))
                 return result;
             else
-                return result.ToUpper();
+                return result.ToUpper(IsUppper);
         }
         public override string GetTranslationColumnName(string entityName, string propertyName)
         {
             var result = base.GetTranslationColumnName(entityName, propertyName);
-            return result.ToUpper();
+            return result.ToUpper(IsUppper);
         }
         public override string GetTranslationColumnName(string propertyName)
         {
             var result = base.GetTranslationColumnName(propertyName);
-            return result.ToUpper();
+            return result.ToUpper(IsUppper);
         }
+        public override string RemoveParentheses(string sql)
+        {
+            if (sql.StartsWith("(") && sql.EndsWith(")"))
+            {
+                sql = sql.Substring(1, sql.Length - 2);
+            }
 
+            return sql;
+        }
+        public override void FormatSaveQueueSql(StringBuilder sqlBuilder)
+        {
+            var sql = sqlBuilder?.ToString();
+            if (sql?.TrimStart()?.Substring(0, 5)?.EqualCase("begin") != true)
+            { 
+                sqlBuilder.Clear();
+                sqlBuilder.AppendLine("begin");
+                sqlBuilder.Append(sql);
+                sqlBuilder.AppendLine("end; ");
+            }
+        }
+        #region Helper
+        public bool IsUppper
+        {
+            get
+            {
+                if (this.Context.CurrentConnectionConfig.MoreSettings == null)
+                {
+                    return true;
+                }
+                else
+                {
+                    return this.Context.CurrentConnectionConfig.MoreSettings.IsAutoToUpper == true;
+                }
+            }
+        }
+        #endregion
     }
 }

@@ -16,16 +16,18 @@ namespace OrmTest
         /// Account have permission to create database
         /// 用有建库权限的数据库账号
         /// </summary>
-        public static string ConnectionString = "Server=127.0.0.1;Port=54321;UID=SYSTEM;PWD=system;database=SQLSUGAR4XTEST1";
+        public static string ConnectionString = "Server=59.108.228.18 ;Port=59322;UID=system;PWD=...abc;database=test222";
+        //R3
+        //public static string ConnectionString = "Server=59.108.228.19;Port=55555;UID=SYSTEM;PWD=XX;database=TEST"
         /// <summary>
         /// Account have permission to create database
         /// 用有建库权限的数据库账号
         /// </summary>
-        public static string ConnectionString2 = "Server=127.0.0.1;Port=54321;UID=SYSTEM;PWD=system;database=SQLSUGAR4XTEST2";
+        public static string ConnectionString2 = ConnectionString;
         /// <summary>
         /// Account have permission to create database
         /// 用有建库权限的数据库账号
         /// </summary>
-        public static string ConnectionString3 = "Server=127.0.0.1;Port=54321;UID=SYSTEM;PWD=system;database=SQLSUGAR4XTEST3";
+        public static string ConnectionString3 = ConnectionString;
     }
 }

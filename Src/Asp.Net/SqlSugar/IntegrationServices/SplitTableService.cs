@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -14,7 +15,7 @@ namespace SqlSugar
         public virtual List<SplitTableInfo> GetAllTables(ISqlSugarClient db, EntityInfo EntityInfo, List<DbTableInfo> tableInfos)
         {
             CheckTableName(EntityInfo.DbTableName);
-            var regex = EntityInfo.DbTableName.Replace("{year}", "([0-9]{2,4})").Replace("{day}", "([0-9]{1,2})").Replace("{month}", "([0-9]{1,2})");
+            var regex = "^"+EntityInfo.DbTableName.Replace("{year}", "([0-9]{2,4})").Replace("{day}", "([0-9]{1,2})").Replace("{month}", "([0-9]{1,2})");
             var currentTables = tableInfos.Where(it => Regex.IsMatch(it.Name, regex, RegexOptions.IgnoreCase)).Select(it => it.Name).Reverse().ToList();
             List<SplitTableInfo> result = new List<SplitTableInfo>();
             foreach (var item in currentTables)
@@ -74,6 +75,10 @@ namespace SqlSugar
                 {
                     return db.GetDate();
                 }
+                else if (value is DateTimeOffset)
+                {
+                    return ((DateTimeOffset)value).DateTime;
+                }
                 else if (UtilMethods.GetUnderType(value.GetType()) != UtilConstants.DateType)
                 {
                     throw new Exception($"DateSplitTableService Split column {splitColumn.PropertyName} not DateTime " + splitType.ToString());
@@ -101,6 +106,8 @@ namespace SqlSugar
                 case SplitType.Season:
                     break;
                 case SplitType.Year:
+                    break;
+                case SplitType.Month_6:
                     break;
                 default:
                     throw new Exception("DateSplitTableService no support " + splitType.ToString());
@@ -165,7 +172,7 @@ namespace SqlSugar
             {
                 day = group3;
             }
-            return Convert.ToDateTime($"{year}-{month}-{day}");
+            return Convert.ToDateTime($"{year}-{month}-{day}",CultureInfo.InvariantCulture);
         }
 
         private string PadLeft2(string str)
@@ -222,8 +229,17 @@ namespace SqlSugar
                     }
                 case SplitType.Year:
                     return Convert.ToDateTime(time.ToString("yyyy-01-01"));
+                case SplitType.Month_6:
+                    if (time.Month <= 6)
+                    {
+                        return Convert.ToDateTime(time.ToString("yyyy-01-01"));
+                    }
+                    else
+                    {
+                        return Convert.ToDateTime(time.ToString("yyyy-07-01"));
+                    }
                 default:
-                    throw new Exception($"SplitType paramter error ");
+                    throw new Exception($"SplitType parameter error ");
             }
         }
         private DateTime GetMondayDate()

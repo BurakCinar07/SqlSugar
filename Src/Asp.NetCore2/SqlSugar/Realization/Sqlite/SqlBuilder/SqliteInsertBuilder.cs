@@ -46,7 +46,7 @@ namespace SqlSugar
             string columnsString = string.Join(",", groupList.First().Select(it => Builder.GetTranslationColumnName(it.DbColumnName)));
             if (isSingle)
             {
-                string columnParametersString = string.Join(",", this.DbColumnInfoList.Select(it => Builder.SqlParameterKeyWord + it.DbColumnName));
+                string columnParametersString = string.Join(",", this.DbColumnInfoList.Select(it =>base.GetDbColumn(it, Builder.SqlParameterKeyWord + it.DbColumnName)));
                 ActionMinDate();
                 return string.Format(SqlTemplate, GetTableNameString, columnsString, columnParametersString);
             }
@@ -62,7 +62,7 @@ namespace SqlSugar
                 foreach (var item in groupList)
                 {
                     batchInsetrSql.Append("(");
-                    insertColumns = string.Join(",", item.Select(it => FormatValue(i,it.DbColumnName,it.Value)));
+                    insertColumns = string.Join(",", item.Select(it =>base.GetDbColumn(it, FormatValue(i,it.DbColumnName,it.Value))));
                     batchInsetrSql.Append(insertColumns);
                     if (groupList.Last() == item)
                     {
@@ -116,6 +116,10 @@ namespace SqlSugar
                         return Convert.ToInt64(value);
                     }
                 }
+                else if (type == UtilConstants.DateTimeOffsetType) 
+                {
+                    return GetDateTimeOffsetString(value);
+                }
                 else if (type == UtilConstants.ByteArrayType)
                 {
                     var parameterName = this.Builder.SqlParameterKeyWord + name + i;
@@ -132,9 +136,29 @@ namespace SqlSugar
                 }
                 else
                 {
-                    return   "'"+value.ToString() + "'";
+                    return "'" + value.ToString() + "'";
                 }
             }
+        }
+
+        private object GetDateTimeOffsetString(object value)
+        {
+            var date = UtilMethods.ConvertFromDateTimeOffset((DateTimeOffset)value);
+            if (date < UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig))
+            {
+                date = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
+            }
+            return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fffffff") + "'";
+        }
+
+        private object GetDateTimeString(object value)
+        {
+            var date = value.ObjToDate();
+            if (date < UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig))
+            {
+                date = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
+            }
+            return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
         }
     }
 }

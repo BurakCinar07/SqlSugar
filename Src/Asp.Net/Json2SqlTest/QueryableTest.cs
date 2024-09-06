@@ -19,6 +19,18 @@ namespace Test
             var x1 = jsonToSqlClient.Queryable(json).ToSqlList();
             var list1 = jsonToSqlClient.Context.Ado.SqlQuery<dynamic>(x1[0].Sql, x1[0].Parameters);
         }
+        private static void WhereTest2(JsonClient jsonToSqlClient)
+        {
+            var onList = new ObjectFuncModel()
+            {
+                FuncName = "SqlFunc_Format",
+                Parameters = new List<object>{
+                "id",">","{int}:1","||","name","is","null"
+           }
+            };
+            //jsonToSqlClient.Context.Queryable<Order>().AddJoinInfo("table1", "a", "id=1 or id=2", JoinType.Left);
+            jsonToSqlClient.Context.Queryable<Order>().Where(onList).ToList();
+        }
         private static void WhereTest(JsonClient jsonToSqlClient)
         {
             jsonToSqlClient.Context.Queryable<object>().AS("order").Max<int>("id");
@@ -42,10 +54,17 @@ namespace Test
                               ]
                 }
                 ";
-            var x2 = jsonToSqlClient.Queryable(json2).ToSqlList(); 
+            var x2 = jsonToSqlClient.Queryable(json2).ToSqlList();
 
+            var json3 = @"{
+                      ""Table"":""order"",
+                      ""Where"":[  ""name"",""="", ""{string}:U""  ],
+                      ""Select"":[ ""{string}:abc"",""name"" ]
+                    }";
+            var x3=jsonToSqlClient.Queryable(json3).ToSqlList();
             var list1 = jsonToSqlClient.Context.Ado.SqlQuery<dynamic>(x1[0].Sql, x1[0].Parameters);
             var list2 = jsonToSqlClient.Context.Ado.SqlQuery<dynamic>(x2[0].Sql, x2[0].Parameters);
+            var list3 = jsonToSqlClient.Context.Ado.SqlQuery<dynamic>(x3[0].Sql, x3[0].Parameters);
         }
         private static void JoinTest(JsonClient jsonToSqlClient)
         {
@@ -71,6 +90,17 @@ namespace Test
                            .AddJoinInfo("orderdetail", "d", onList, JoinType.Left)
                            .Select(selectItems)
                            .ToList();
+            var selectItems2 = new List<SelectModel>() {
+                                        new SelectModel()
+                                        {
+                                            AsName = "o.id",
+                                            FiledName = "o.id"
+                                         } };
+            var x2 = jsonToSqlClient.Context.Queryable<object>()
+                        .AS("order", "o")
+                        .AddJoinInfo("orderdetail", "d", onList, JoinType.Left)
+                        .Select(selectItems2, AsNameFormatType.NoConvert)
+                        .ToList();
             var json = @"
 {
 	""Table"":[ ""order"",""o""],
@@ -152,7 +182,8 @@ namespace Test
                 {
 	                ""Table"":""order"",
                       PageNumber:""1"",
-                      PageSize:""100""
+                      PageSize:""100"",
+                      OrderBy:[""id""]
                 }
                 ";
             var x1 = jsonToSqlClient.Queryable(json).ToResult();

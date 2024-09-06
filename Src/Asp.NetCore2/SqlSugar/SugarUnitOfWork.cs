@@ -24,7 +24,29 @@ namespace SqlSugar
             return Db.CreateContext<T>(isTran);
         }
     }
-    public class SugarUnitOfWork : IDisposable
+    public interface ISugarUnitOfWorkClear
+    {
+        RepositoryType GetMyRepository<RepositoryType>() where RepositoryType : new();
+
+        bool Commit();
+    }
+    /// <summary>
+    /// ISugarUnitOfWorkClear  not exists SqlSugar method
+    /// ISugarUnitOfWork exists SqlSugar method
+    /// </summary>
+    public interface ISugarUnitOfWork : ISugarUnitOfWorkClear
+    {
+        ISqlSugarClient Db { get;  }
+        ITenant Tenant { get;  }
+
+        SimpleClient<T> GetRepository<T>() where T : class, new();
+    }
+    /// <summary>
+    /// SugarUnitOfWork->ISugarUnitOfWork->ISaugarUnitOfWorkClear
+    /// ISaugarUnitOfWorkClear  not exists SqlSugar method
+    /// ISugarUnitOfWork exists SqlSugar method
+    /// </summary>
+    public class SugarUnitOfWork : IDisposable, ISugarUnitOfWork
     {
         public ISqlSugarClient Db { get; internal set; }
         public ITenant Tenant { get; internal set; }
@@ -39,7 +61,7 @@ namespace SqlSugar
             {
                 this.Tenant.RollbackTran();
             }
-            if (IsClose == false)
+            if (this.Db.Ado.Transaction==null&&IsClose == false)
             {
                 this.Db.Close();
             }
@@ -58,11 +80,11 @@ namespace SqlSugar
             }
         }
 
-        public RepositoryType GetMyRepository<RepositoryType>() where RepositoryType : ISugarRepository, new()
+        public RepositoryType GetMyRepository<RepositoryType>() where RepositoryType:new()
         {
-            var result = new RepositoryType();
-            var type = typeof(RepositoryType).GetGenericArguments()[0];
-            TenantAttribute tenantAttribute = type.GetCustomAttribute<TenantAttribute>();
+            var result = (ISugarRepository)new RepositoryType();
+            var type = typeof(RepositoryType).GetGenericArguments().FirstOrDefault();
+            TenantAttribute tenantAttribute = type?.GetCustomAttribute<TenantAttribute>();
             if (tenantAttribute == null)
             {
                 result.Context = this.Db;
@@ -71,7 +93,7 @@ namespace SqlSugar
             {
                 result.Context = this.Db.AsTenant().GetConnection(tenantAttribute.configId);
             }
-            return result;
+            return (RepositoryType)result;
         }
 
         public bool Commit()
@@ -81,7 +103,7 @@ namespace SqlSugar
                 this.Tenant.CommitTran();
                 IsCommit = true;
             }
-            if (this.IsClose == false)
+            if (this.Db.Ado.Transaction==null&&this.IsClose == false)
             {
                 this.Db.Close();
                 IsClose = true;

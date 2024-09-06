@@ -40,46 +40,61 @@ namespace SqlSugar
                 case ResolveExpressType.FieldMultiple:
                 case ResolveExpressType.ArrayMultiple:
                 case ResolveExpressType.ArraySingle:
-                    foreach (var item in expression.Arguments)
-                    {
-                        if (IsDateValue(item))
-                        {
-                            var value = GetNewExpressionValue(item);
-                            base.Context.Result.Append(value);
-                        }
-                        else
-                        {
-                            base.Expression = item;
-                            base.Start();
-                        }
-                    }
+                    ArraySingle(expression);
                     break;
                 case ResolveExpressType.Join:
-                    base.Context.ResolveType = ResolveExpressType.WhereMultiple;
-                    int i = 0;
-                    foreach (var item in expression.Arguments)
-                    {
-                        if (item.Type!=typeof(JoinType))
-                        {
-                            base.Expression = item;
-                            base.Start();
-                        }
-                        if (item.Type == typeof(JoinType))
-                        {
-                            if (i > 0)
-                            {
-                                base.Context.Result.Append("," + item.ToString()+ ",");
-                            }
-                            else
-                            {
-                                base.Context.Result.Append(item.ToString() + ",");
-                            }
-                            ++i;
-                        }
-                    }
+                    Join(expression);
                     break;
                 default:
                     break;
+            }
+        }
+
+        private void Join(NewExpression expression)
+        {
+            base.Context.ResolveType = ResolveExpressType.WhereMultiple;
+            int i = 0;
+            foreach (var item in expression.Arguments)
+            {
+                if (item.Type != typeof(JoinType))
+                {
+                    base.Expression = item;
+                    base.Start();
+                }
+                if (item.Type == typeof(JoinType))
+                {
+                    var joinValue = item.ObjToString();
+                    if (joinValue.Contains("("))
+                    {
+                        joinValue = ExpressionTool.DynamicInvoke(item).ObjToString();
+                    }
+                    if (i > 0)
+                    {
+                        base.Context.Result.Append("," + joinValue + ",");
+                    }
+                    else
+                    {
+                        base.Context.Result.Append(joinValue + ",");
+                    }
+                    ++i;
+                }
+            }
+        }
+
+        private void ArraySingle(NewExpression expression)
+        {
+            foreach (var item in expression.Arguments)
+            {
+                if (IsDateValue(item))
+                {
+                    var value = GetNewExpressionValue(item);
+                    base.Context.Result.Append(value);
+                }
+                else
+                {
+                    base.Expression = item;
+                    base.Start();
+                }
             }
         }
 
@@ -130,7 +145,18 @@ namespace SqlSugar
                 int i = 0;
                 foreach (var item in expression.Arguments)
                 {
-                    string memberName = expression.Members[i].Name;
+
+                    string memberName = expression.Members?[i]?.Name;
+                    if (memberName == null&& expression.Members ==null && item is MemberExpression member) 
+                    {
+                        memberName = member.Member.Name;
+                        this.Context.SugarContext.QueryBuilder.IsParameterizedConstructor = true;
+                    }
+                    if (this.Context?.SugarContext?.QueryBuilder?.AppendNavInfo?.MappingNavProperties?.ContainsKey(memberName) == true)
+                    {
+                        ++i;
+                        continue;
+                    }
                     ++i;
                     ResolveNewExpressions(parameter, item, memberName);
                 }

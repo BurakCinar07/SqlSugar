@@ -12,7 +12,16 @@ namespace SqlSugar
 {
     public partial class PostgreSQLProvider : AdoProvider
     {
-        public PostgreSQLProvider() { }
+        public PostgreSQLProvider() 
+        {
+
+            if (StaticConfig.AppContext_ConvertInfinityDateTime == false)
+            {
+                AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+                AppContext.SetSwitch("Npgsql.DisableDateTimeInfinityConversions", true);
+            }
+         
+        }
         public override IDbConnection Connection
         {
             get
@@ -89,8 +98,9 @@ namespace SqlSugar
             var isVarchar = this.Context.IsVarchar();
             foreach (var parameter in parameters)
             {
+                UNumber(parameter);
                 if (parameter.Value == null) parameter.Value = DBNull.Value;
-                if(parameter.Value is System.Data.SqlTypes.SqlDateTime&&parameter.DbType==System.Data.DbType.AnsiString)
+                if (parameter.Value is System.Data.SqlTypes.SqlDateTime && parameter.DbType == System.Data.DbType.AnsiString)
                 {
                     parameter.DbType = System.Data.DbType.DateTime;
                     parameter.Value = DBNull.Value;
@@ -107,36 +117,7 @@ namespace SqlSugar
                 }
                 if (parameter.IsArray)
                 {
-                    //    sqlParameter.Value = this.Context.Utilities.SerializeObject(sqlParameter.Value);
-                    var type = sqlParameter.Value.GetType();
-                    if (ArrayMapping.ContainsKey(type))
-                    {
-                        sqlParameter.NpgsqlDbType = ArrayMapping[type] | NpgsqlDbType.Array;
-                    }
-                    else if (type==DBNull.Value.GetType()) 
-                    {
-                        if (parameter.DbType.IsIn(System.Data.DbType.Int32))
-                        {
-                            sqlParameter.NpgsqlDbType = NpgsqlDbType.Integer | NpgsqlDbType.Array;
-                        }
-                        else if (parameter.DbType.IsIn(System.Data.DbType.Int16))
-                        {
-                            sqlParameter.NpgsqlDbType = NpgsqlDbType.Smallint | NpgsqlDbType.Array;
-                        }
-                        else if (parameter.DbType.IsIn(System.Data.DbType.Int64))
-                        {
-                            sqlParameter.NpgsqlDbType = NpgsqlDbType.Bigint | NpgsqlDbType.Array;
-                        }
-                        else 
-                        {
-                            sqlParameter.NpgsqlDbType =NpgsqlDbType.Text | NpgsqlDbType.Array;
-                        }
-
-                    }
-                    else
-                    {
-                        Check.Exception(true, sqlParameter.Value.GetType().Name + " No Support");
-                    }
+                    Array(parameter, sqlParameter);
                 }
                 if (sqlParameter.Direction == 0)
                 {
@@ -153,11 +134,111 @@ namespace SqlSugar
                 {
                     sqlParameter.DbType = System.Data.DbType.AnsiString;
                 }
+                else if (sqlParameter.Value is DateTime && sqlParameter.DbType == System.Data.DbType.AnsiString)
+                {
+                    sqlParameter.DbType = System.Data.DbType.DateTime;
+                }
                 ++index;
+                if (parameter.CustomDbType != null&& parameter.CustomDbType is NpgsqlDbType)
+                {
+                    sqlParameter.NpgsqlDbType =((NpgsqlDbType)parameter.CustomDbType);
+                }
             }
             return result;
         }
 
+        //private static void ConvertUNumber(SugarParameter parameter)
+        //{
+        //    if (parameter.DbType == System.Data.DbType.UInt32)
+        //    {
+        //        parameter.DbType = System.Data.DbType.Int32;
+        //    }
+        //    else if (parameter.DbType == System.Data.DbType.UInt64)
+        //    {
+        //        parameter.DbType = System.Data.DbType.UInt64;
+        //    }
+        //}
+
+        private static void Array(SugarParameter parameter, NpgsqlParameter sqlParameter)
+        {
+            //    sqlParameter.Value = this.Context.Utilities.SerializeObject(sqlParameter.Value);
+            var type = sqlParameter.Value.GetType();
+            if (ArrayMapping.ContainsKey(type))
+            {
+                sqlParameter.NpgsqlDbType = ArrayMapping[type] | NpgsqlDbType.Array;
+            }
+            else if (type == DBNull.Value.GetType())
+            {
+                DbNullParametrerArray(parameter, sqlParameter);
+
+            }
+            else
+            {
+                Check.Exception(true, sqlParameter.Value.GetType().Name + " No Support");
+            }
+        }
+
+        private static void DbNullParametrerArray(SugarParameter parameter, NpgsqlParameter sqlParameter)
+        {
+            if (parameter.DbType.IsIn(System.Data.DbType.Int32))
+            {
+                sqlParameter.NpgsqlDbType = NpgsqlDbType.Integer | NpgsqlDbType.Array;
+            }
+            else if (parameter.DbType.IsIn(System.Data.DbType.Int16))
+            {
+                sqlParameter.NpgsqlDbType = NpgsqlDbType.Smallint | NpgsqlDbType.Array;
+            }
+            else if (parameter.DbType.IsIn(System.Data.DbType.Int64))
+            {
+                sqlParameter.NpgsqlDbType = NpgsqlDbType.Bigint | NpgsqlDbType.Array;
+            }
+            else if (parameter.DbType.IsIn(System.Data.DbType.Guid))
+            {
+                sqlParameter.NpgsqlDbType = NpgsqlDbType.Uuid | NpgsqlDbType.Array;
+            }
+            else
+            {
+                sqlParameter.NpgsqlDbType = NpgsqlDbType.Text | NpgsqlDbType.Array;
+            }
+        }
+
+        private static void UNumber(SugarParameter parameter)
+        {
+            if (parameter.DbType == System.Data.DbType.UInt16)
+            {
+                parameter.DbType = System.Data.DbType.Int16;
+                parameter.Value = Convert.ToInt16(parameter.Value);
+            }
+            else if (parameter.DbType == System.Data.DbType.UInt32)
+            {
+                parameter.DbType = System.Data.DbType.Int32;
+                parameter.Value = Convert.ToInt32(parameter.Value);
+            }
+            else if (parameter.DbType == System.Data.DbType.UInt64)
+            {
+                parameter.DbType = System.Data.DbType.Int64;
+                parameter.Value = Convert.ToInt64(parameter.Value);
+            }
+            if (parameter.Value is uint)
+            {
+                parameter.Value = Convert.ToInt32(parameter.Value);
+            }
+            else if (parameter.Value is ulong)
+            {
+                parameter.Value = Convert.ToInt64(parameter.Value);
+            }
+        }
+        public override Action<SqlSugarException> ErrorEvent => it =>
+        {
+            if (base.ErrorEvent != null)
+            {
+                base.ErrorEvent(it);
+            }
+            if (it.Message != null && it.Message.StartsWith("42883: function uuid_generate_v4() does not exist"))
+            {
+                Check.ExceptionEasy(it.Message, $"使用uuid_generate_v4()函数需要创建 CREATE EXTENSION IF NOT EXISTS pgcrypto;CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\" ");
+            }
+        };
 
         static readonly Dictionary<Type, NpgsqlDbType> ArrayMapping = new Dictionary<Type, NpgsqlDbType>()
         {
@@ -170,6 +251,7 @@ namespace SqlSugar
             { typeof(bool[]),NpgsqlDbType.Boolean},
             {typeof(DateTime[]),NpgsqlDbType.Date},
             {typeof(float[]),NpgsqlDbType.Real},
+            {typeof(Guid[]),NpgsqlDbType.Uuid},
 
 
             { typeof(int?[]),NpgsqlDbType.Integer},
@@ -180,6 +262,7 @@ namespace SqlSugar
             { typeof(byte?[]),NpgsqlDbType.Bytea},
             { typeof(bool?[]),NpgsqlDbType.Boolean},
             {typeof(DateTime?[]),NpgsqlDbType.Date},
+            {typeof(Guid?[]),NpgsqlDbType.Uuid},
 
 
              { typeof(string[]), NpgsqlDbType.Text},

@@ -8,6 +8,11 @@ namespace SqlSugar
 {
     public class SqlServerInsertBuilder:InsertBuilder
     {
+        public override Func<string, string, string> ConvertInsertReturnIdFunc { get; set; } = (name, sql) =>
+        {
+            return sql.Replace("select SCOPE_IDENTITY();", "").Replace(")\r\n SELECT", $")\r\n OUTPUT INSERTED.{name} as {name}  \r\nSELECT");
+        };
+        public override bool IsNoPage { get; set; } = true;
         public override string ToSqlString()
         {
             if (IsNoInsertNull)
@@ -17,10 +22,11 @@ namespace SqlSugar
             var groupList = DbColumnInfoList.GroupBy(it => it.TableId).ToList();
             var isSingle = groupList.Count() == 1;
             string columnsString = string.Join(",", groupList.First().Select(it => Builder.GetTranslationColumnName(it.DbColumnName)));
+            var result = "";
             if (isSingle)
             {
-                string columnParametersString = string.Join(",", this.DbColumnInfoList.Select(it => Builder.SqlParameterKeyWord + it.DbColumnName));
-                return string.Format(SqlTemplate, GetTableNameString, columnsString, columnParametersString);
+                string columnParametersString = string.Join(",", this.DbColumnInfoList.Select(it =>base.GetDbColumn(it,Builder.SqlParameterKeyWord + it.DbColumnName)));
+                result= string.Format(SqlTemplate, GetTableNameString, columnsString, columnParametersString);
             }
             else
             {
@@ -33,6 +39,10 @@ namespace SqlSugar
                 else if (this.EntityInfo.Columns.Count > 20)
                 {
                     pageSize = 100;
+                }
+                if (IsNoPage && IsReturnPkList) 
+                {
+                    pageSize = groupList.Count;
                 }
                 int pageIndex = 1;
                 int totalRecord = groupList.Count;
@@ -48,19 +58,29 @@ namespace SqlSugar
                         {
                             batchInsetrSql.Append(SqlTemplateBatchUnion);
                         }
-                        batchInsetrSql.Append("\r\n SELECT " + string.Join(",", columns.Select(it => string.Format(SqlTemplateBatchSelect, FormatValue(it.Value), Builder.GetTranslationColumnName(it.DbColumnName)))));
+                        batchInsetrSql.Append("\r\n SELECT " + string.Join(",", columns.Select(it => string.Format(SqlTemplateBatchSelect,base.GetDbColumn(it, FormatValue(it.Value)), Builder.GetTranslationColumnName(it.DbColumnName)))));
                         ++i;
                     }
                     pageIndex++;
                     batchInsetrSql.Append("\r\n;\r\n");
                 }
-                var result = batchInsetrSql.ToString();
+                 result = batchInsetrSql.ToString();
                 if (this.Context.CurrentConnectionConfig.DbType == DbType.SqlServer)
                 {
                     result += "select SCOPE_IDENTITY();";
                 }
-                return result;
             }
+
+            if (this.IsOffIdentity)
+            {
+                var tableName = this.GetTableNameString;
+                result= $"SET IDENTITY_INSERT {tableName} ON;" + result.TrimEnd(';') + $";SET IDENTITY_INSERT {tableName} OFF"; ;
+            }
+            return result;
+        }
+        public override string FormatDateTimeOffset(object value)
+        {
+            return "'" + ((DateTimeOffset)value).ToString("o") + "'";
         }
     }
 }

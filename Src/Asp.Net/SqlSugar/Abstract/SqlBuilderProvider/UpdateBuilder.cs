@@ -26,14 +26,22 @@ namespace SqlSugar
         public string TableWithString { get; set; }
         public List<DbColumnInfo> DbColumnInfoList { get; set; }
         public List<string> WhereValues { get; set; }
+        public string AppendWhere { get; set; }
         public List<KeyValuePair<string, string>> SetValues { get; set; }
         public bool IsNoUpdateNull { get; set; }
         public bool IsNoUpdateDefaultValue { get; set; }
         public List<string> PrimaryKeys { get; set; }
+        public List<string> OldPrimaryKeys { get; set; }
         public bool IsOffIdentity { get; set; }
         public bool IsWhereColumns { get; set; }
         public  bool? IsListUpdate { get; set; }
-
+        public List<string> UpdateColumns { get; set; }
+        public List<string> IgnoreColumns { get; set; }
+        public List<JoinQueryInfo> JoinInfos { get; set; }
+        public  string ShortName { get; set; }
+        public Dictionary<string, ReSetValueBySqlExpListModel> ReSetValueBySqlExpList { get;  set; }
+        public virtual string ReSetValueBySqlExpListType { get; set; }
+        public EntityInfo EntityInfo { get; set; }
         public virtual string SqlTemplate
         {
             get
@@ -152,11 +160,25 @@ namespace SqlSugar
         {
             if (IsNoUpdateNull)
             {
-                DbColumnInfoList = DbColumnInfoList.Where(it => it.Value != null).ToList();
+                DbColumnInfoList = DbColumnInfoList.Where(it => it.Value != null||(it.UpdateServerTime == true ||!string.IsNullOrEmpty(it.UpdateSql))).ToList();
             }
             if (IsNoUpdateDefaultValue)
             {
-                DbColumnInfoList = DbColumnInfoList.Where(it => it.Value.ObjToString() !=UtilMethods.DefaultForType(it.PropertyType).ObjToString()).ToList();
+                DbColumnInfoList = DbColumnInfoList.Where(it => {
+                    if (it.Value.ObjToString() == "0" && it.PropertyType.IsEnum)
+                    {
+                        return it.Value.ObjToLong() != UtilMethods.DefaultForType(it.PropertyType).ObjToLong();
+                    }
+                    else if (it.UpdateServerTime == true || !string.IsNullOrEmpty(it.UpdateSql)) 
+                    {
+                        return true;
+                    }
+                    else
+                    {
+                        return it.Value.ObjToString() != UtilMethods.DefaultForType(it.PropertyType).ObjToString();
+                    }
+
+                    }).ToList();
             }
             var groupList = DbColumnInfoList.GroupBy(it => it.TableId).ToList();
             var isSingle = groupList.Count() == 1;
@@ -244,8 +266,13 @@ namespace SqlSugar
                     {
                         return setValue.First().Value;
                     }
+                    else if (JoinInfos!=null&&JoinInfos.Any()) 
+                    {
+                        setValue = SetValues.Where(sv => it.IsPrimarykey == false && (it.IsIdentity == false || (IsOffIdentity && it.IsIdentity))).Where(sv => sv.Key == Builder.GetNoTranslationColumnName(it.DbColumnName) || sv.Key == Builder.GetNoTranslationColumnName(it.PropertyName));
+                        return Builder.GetTranslationColumnName(this.ShortName)+"."+ Builder.GetTranslationColumnName(setValue.First().Key)+"="+ setValue.First().Value ;
+                    }
                 }
-                var result = Builder.GetTranslationColumnName(it.DbColumnName) + "=" + this.Context.Ado.SqlParameterKeyWord + it.DbColumnName;
+                var result = Builder.GetTranslationColumnName(it.DbColumnName) + "=" + GetDbColumn(it,this.Context.Ado.SqlParameterKeyWord + it.DbColumnName);
                 return result;
             }));
             string whereString = null;
@@ -262,11 +289,25 @@ namespace SqlSugar
             {
                 if (IsWhereColumns == false)
                 {
+                    int i = 100000;
                     foreach (var item in PrimaryKeys)
                     {
+                        i++;
                         var isFirst = whereString == null;
                         whereString += (isFirst ? " WHERE " : " AND ");
-                        whereString += Builder.GetTranslationColumnName(item) + "=" + this.Context.Ado.SqlParameterKeyWord + item;
+                        var pkIsSugarDataConverter = GetPkIsSugarDataConverter();
+                        if (pkIsSugarDataConverter && GetColumnInfo(item)!=null)
+                        {
+                            var columnInfo = GetColumnInfo(item);
+                            var value=this.DbColumnInfoList.FirstOrDefault(it => it.DbColumnName.EqualCase(item) || it.PropertyName.EqualCase(item))?.Value;
+                            var p = UtilMethods.GetParameterConverter(i, this.Context, value, this.EntityInfo, this.EntityInfo?.Columns.First(it => it.DbColumnName.Equals(item) || it.PropertyName.Equals(item)));
+                            whereString += Builder.GetTranslationColumnName(item) + "=" + p.ParameterName;
+                            this.Parameters.Add(p);
+                        }
+                        else
+                        {
+                            whereString += Builder.GetTranslationColumnName(item) + "=" + this.Context.Ado.SqlParameterKeyWord + item;
+                        }
                     }
                 }
             }
@@ -279,8 +320,37 @@ namespace SqlSugar
                     whereString += Builder.GetTranslationColumnName(item) + "=" + this.Context.Ado.SqlParameterKeyWord + item;
                 }
             }
+            if (this.JoinInfos != null && this.JoinInfos.Any())
+            {
+                return GetJoinUpdate(columnsString, ref whereString);
+            }
             return string.Format(SqlTemplate, GetTableNameString, columnsString, whereString);
         }
+
+        private EntityColumnInfo GetColumnInfo(string item)
+        {
+            var columnInfo= this.EntityInfo?.Columns?.FirstOrDefault(it => it.DbColumnName.Equals(item) || it.PropertyName.Equals(item));
+            return columnInfo;
+        }
+
+        private bool GetPkIsSugarDataConverter()
+        {
+            return this.EntityInfo?.Columns.Any(it => it.IsPrimarykey && it.SqlParameterDbType is Type&&typeof(ISugarDataConverter).IsAssignableFrom((it.SqlParameterDbType as Type))) == true;
+        }
+
+        protected virtual string GetJoinUpdate(string columnsString, ref string whereString)
+        {
+            var tableName = Builder.GetTranslationColumnName(this.TableName);
+            this.TableName = Builder.GetTranslationColumnName(this.ShortName);
+            var joinString = $" FROM {tableName} {Builder.GetTranslationColumnName(this.ShortName)} ";
+            foreach (var item in this.JoinInfos)
+            {
+                joinString += $"\r\n JOIN {Builder.GetTranslationColumnName(item.TableName)}  {Builder.GetTranslationColumnName(item.ShortName)} ON {item.JoinWhere} ";
+            }
+            whereString = joinString + "\r\n" + whereString;
+            return string.Format(SqlTemplate, GetTableNameString, columnsString, whereString);
+        }
+
         public virtual void ActionMinDate()
         {
             if (this.Parameters != null)
@@ -343,12 +413,26 @@ namespace SqlSugar
                 }
                 else if (type == UtilConstants.DateTimeOffsetType)
                 {
-                    var date = UtilMethods.ConvertFromDateTimeOffset((DateTimeOffset)value);
-                    return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+                    return FormatDateTimeOffset(value);
                 }
                 else if (type == UtilConstants.StringType || type == UtilConstants.ObjType)
                 {
                     return "N'" + value.ToString().ToSqlFilter() + "'";
+                }
+                else if (type==UtilConstants.IntType||type==UtilConstants.LongType)
+                {
+                    return value;
+                }
+                else if (UtilMethods.IsNumber(type.Name)) 
+                {
+                    if (value.ObjToString().Contains(","))
+                    {
+                        return $"'{value}'";
+                    }
+                    else
+                    {
+                        return value;
+                    }
                 }
                 else
                 {
@@ -356,5 +440,150 @@ namespace SqlSugar
                 }
             }
         }
+
+        public virtual string FormatDateTimeOffset(object value)
+        {
+            var date = UtilMethods.ConvertFromDateTimeOffset((DateTimeOffset)value);
+            return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+        }
+        private int GetDbColumnIndex = 0;
+        public virtual string GetDbColumn(DbColumnInfo columnInfo, object name)
+        {
+            if (columnInfo.UpdateServerTime)
+            {
+                return LambdaExpressions.DbMehtods.GetDate();
+            }
+            else if (columnInfo.PropertyType.FullName == "NetTopologySuite.Geometries.Geometry") 
+            {
+                var pname = Builder.SqlParameterKeyWord + "Geometry" + GetDbColumnIndex;
+                var p = new SugarParameter(pname, columnInfo.Value);
+                p.DbType= System.Data.DbType.Object;
+                this.Parameters.Add(p);
+                GetDbColumnIndex++;
+                return pname;
+            }
+            else if (UtilMethods.IsErrorDecimalString() == true)
+            {
+                var pname = Builder.SqlParameterKeyWord + "Decimal" + GetDbColumnIndex;
+                var p = new SugarParameter(pname, columnInfo.Value);
+                this.Parameters.Add(p);
+                GetDbColumnIndex++;
+                return pname;
+            }
+            else if (IsListSetExp(columnInfo) || IsSingleSetExp(columnInfo))
+            {
+                if (this.ReSetValueBySqlExpList[columnInfo.PropertyName].Type == ReSetValueBySqlExpListModelType.List)
+                {
+                    return Builder.GetTranslationColumnName(columnInfo.DbColumnName) + this.ReSetValueBySqlExpList[columnInfo.PropertyName].Sql + name;
+                }
+                else
+                {
+                    return this.ReSetValueBySqlExpList[columnInfo.PropertyName].Sql;
+                }
+            }
+            else if (columnInfo.UpdateSql.HasValue())
+            {
+                if (columnInfo.UpdateSql.Contains("{0}"))
+                {
+                    if (columnInfo.Value == null)
+                    {
+                        return string.Format(columnInfo.UpdateSql, "null").Replace("'null'", "null");
+                    }
+                    else
+                    {
+                        return string.Format(columnInfo.UpdateSql, columnInfo.Value?.ObjToString().ToSqlFilter());
+                    }
+                }
+                return columnInfo.UpdateSql;
+            }
+            else if (columnInfo.SqlParameterDbType is Type && (Type)columnInfo.SqlParameterDbType == UtilConstants.SqlConvertType)
+            {
+                var type = columnInfo.SqlParameterDbType as Type;
+                var ParameterConverter = type.GetMethod("ParameterConverter").MakeGenericMethod(typeof(string));
+                var obj = Activator.CreateInstance(type);
+                var p = ParameterConverter.Invoke(obj, new object[] { columnInfo.Value, GetDbColumnIndex }) as SugarParameter;
+                return p.ParameterName;
+            }
+            else if (columnInfo.SqlParameterDbType is Type)
+            {
+                var type = columnInfo.SqlParameterDbType as Type;
+                var ParameterConverter = type.GetMethod("ParameterConverter").MakeGenericMethod(columnInfo.PropertyType);
+                var obj = Activator.CreateInstance(type);
+                var p = ParameterConverter.Invoke(obj, new object[] { columnInfo.Value, GetDbColumnIndex }) as SugarParameter;
+                GetDbColumnIndex++;
+                //this.Parameters.RemoveAll(it => it.ParameterName == it.ParameterName);
+                this.Parameters.Add(p);
+                return p.ParameterName;
+            }
+            else if (columnInfo.PropertyType != null && columnInfo.PropertyType.Name == "TimeOnly" && name != null && !name.ObjToString().StartsWith(Builder.SqlParameterKeyWord))
+            {
+                var timeSpan = UtilMethods.TimeOnlyToTimeSpan(columnInfo.Value);
+                var pname = Builder.SqlParameterKeyWord + columnInfo.DbColumnName + "_ts" + GetDbColumnIndex;
+                if (timeSpan == null)
+                {
+                    this.Parameters.Add(new SugarParameter(pname, null) { DbType = System.Data.DbType.Date });
+                }
+                else
+                {
+                    this.Parameters.Add(new SugarParameter(pname, timeSpan));
+                }
+                GetDbColumnIndex++;
+                return pname;
+            }
+            else if (columnInfo.PropertyType != null && columnInfo.PropertyType.Name == "DateOnly")
+            {
+                var timeSpan = UtilMethods.DateOnlyToDateTime(columnInfo.Value);
+                var pname = Builder.SqlParameterKeyWord + columnInfo.DbColumnName + "_ts" + GetDbColumnIndex;
+                if (timeSpan == null)
+                {
+                    this.Parameters.Add(new SugarParameter(pname, null) { DbType = System.Data.DbType.Date });
+                }
+                else
+                {
+                    this.Parameters.Add(new SugarParameter(pname, Convert.ToDateTime(timeSpan)));
+                }
+                GetDbColumnIndex++;
+                return pname;
+            }
+            else if (UtilMethods.IsErrorParameterName(this.Context.CurrentConnectionConfig, columnInfo))
+            {
+                var pname = Builder.SqlParameterKeyWord + "CrorrPara" + GetDbColumnIndex;
+                var p = new SugarParameter(pname, columnInfo.Value);
+                this.Parameters.Add(p);
+                GetDbColumnIndex++;
+                return pname;
+
+            }
+            else
+            {
+                return name + "";
+            }
+        }
+        private bool IsSingleSetExp(DbColumnInfo columnInfo) 
+        {
+            return this.ReSetValueBySqlExpList != null && 
+                this.ReSetValueBySqlExpList.ContainsKey(columnInfo.PropertyName) && 
+                this.IsListUpdate == null&& 
+                DbColumnInfoList.GroupBy(it => it.TableId).Count()==1;
+        }
+        private bool IsListSetExp(DbColumnInfo columnInfo)
+        {
+            return this.ReSetValueBySqlExpListType != null && this.ReSetValueBySqlExpList != null && this.ReSetValueBySqlExpList.ContainsKey(columnInfo.PropertyName);
+        }
+        //public virtual string GetDbColumn(DbColumnInfo columnInfo, string name)
+        //{
+        //    if (columnInfo.UpdateServerTime)
+        //    {
+        //        return LambdaExpressions.DbMehtods.GetDate();
+        //    }
+        //    else if (columnInfo.UpdateSql.HasValue())
+        //    {
+        //        return columnInfo.UpdateSql;
+        //    }
+        //    else
+        //    {
+        //        return name + "";
+        //    }
+        //}
     }
 }

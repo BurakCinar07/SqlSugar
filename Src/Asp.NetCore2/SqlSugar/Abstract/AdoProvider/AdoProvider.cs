@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data;
@@ -39,6 +39,10 @@ namespace SqlSugar
         internal bool OldClearParameters { get; set; }
         public IDataParameterCollection DataReaderParameters { get; set; }
         public TimeSpan SqlExecutionTime { get { return AfterTime - BeforeTime; } }
+        /// <summary>
+        /// Add, delete and modify: the number of affected items;
+        /// </summary>
+        public int SqlExecuteCount { get; private set; } = 0;
         public StackTraceInfo SqlStackTrace { get { return UtilMethods.GetStackTrace(); } }
         public bool IsDisableMasterSlaveSeparation { get; set; }
         internal DateTime BeforeTime = DateTime.MinValue;
@@ -77,10 +81,26 @@ namespace SqlSugar
         {
             try
             {
+                if (this.IsAnyTran()) 
+                {
+                    return true;
+                }
                 using (OpenAlways()) 
                 {
                     return true;
                 }
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+        public virtual bool IsValidConnectionNoClose()
+        {
+            try
+            {
+                this.Open();
+                return true;
             }
             catch (Exception)
             {
@@ -129,10 +149,10 @@ namespace SqlSugar
                 this.Transaction.Rollback();
                 this.Transaction = null;
             }
-            if (this.Connection != null && this.Connection.State != ConnectionState.Open)
-            {
-                this.Connection.Close();
-            }
+            //if (this.Connection != null && this.Connection.State != ConnectionState.Open)
+            //{
+            //    this.Connection.Close();
+            //}
             if (this.Connection != null)
             {
                 this.Connection.Dispose();
@@ -163,25 +183,59 @@ namespace SqlSugar
                 }
                 catch (Exception ex)
                 {
-                    Check.Exception(true, ErrorMessage.ConnnectionOpen, ex.Message);
+                    Check.Exception(true, ErrorMessage.ConnnectionOpen, ex.Message+$"DbType=\"{this.Context.CurrentConnectionConfig.DbType}\";ConfigId=\"{this.Context.CurrentConnectionConfig.ConfigId}\"");
                 }
             }
         }
 
+        public virtual async Task CheckConnectionAsync()
+        {
+            if (this.Connection.State != ConnectionState.Open)
+            {
+                try
+                {
+                    await (this.Connection as DbConnection).OpenAsync();
+                }
+                catch (Exception ex)
+                {
+                    Check.Exception(true, ErrorMessage.ConnnectionOpen, ex.Message + $"DbType=\"{this.Context.CurrentConnectionConfig.DbType}\";ConfigId=\"{this.Context.CurrentConnectionConfig.ConfigId}\"");
+                }
+            }
+        }
         #endregion
 
         #region Transaction
+        public virtual bool IsAnyTran() 
+        {
+            return this.Transaction != null;
+        }
+        public virtual bool IsNoTran()
+        {
+            return this.Transaction == null;
+        }
         public virtual void BeginTran()
         {
             CheckConnection();
             if (this.Transaction == null)
                 this.Transaction = this.Connection.BeginTransaction();
         }
+        public virtual async Task BeginTranAsync()
+        {
+            await CheckConnectionAsync();
+            if (this.Transaction == null)
+                this.Transaction =await (this.Connection as DbConnection).BeginTransactionAsync();
+        }
         public virtual void BeginTran(IsolationLevel iso)
         {
             CheckConnection();
             if (this.Transaction == null)
                 this.Transaction = this.Connection.BeginTransaction(iso);
+        }
+        public virtual async Task BeginTranAsync(IsolationLevel iso)
+        {
+            await CheckConnectionAsync();
+            if (this.Transaction == null)
+                this.Transaction =await (this.Connection as DbConnection).BeginTransactionAsync(iso);
         }
         public virtual void RollbackTran()
         {
@@ -192,6 +246,16 @@ namespace SqlSugar
                 if (this.Context.CurrentConnectionConfig.IsAutoCloseConnection) this.Close();
             }
         }
+
+        public virtual async Task RollbackTranAsync()
+        {
+            if (this.Transaction != null)
+            {
+                await (this.Transaction as DbTransaction).RollbackAsync();
+                this.Transaction = null;
+                if (this.Context.CurrentConnectionConfig.IsAutoCloseConnection) await this.CloseAsync();
+            }
+        }
         public virtual void CommitTran()
         {
             if (this.Transaction != null)
@@ -199,6 +263,15 @@ namespace SqlSugar
                 this.Transaction.Commit();
                 this.Transaction = null;
                 if (this.Context.CurrentConnectionConfig.IsAutoCloseConnection) this.Close();
+            }
+        }
+        public virtual async Task CommitTranAsync()
+        {
+            if (this.Transaction != null)
+            {
+                await (this.Transaction as DbTransaction).CommitAsync();
+                this.Transaction = null;
+                if (this.Context.CurrentConnectionConfig.IsAutoCloseConnection) await this.CloseAsync();
             }
         }
         #endregion
@@ -214,6 +287,10 @@ namespace SqlSugar
         #endregion
 
         #region Use
+        public SqlSugarTransactionAdo UseTran()
+        {
+            return new SqlSugarTransactionAdo(this.Context);
+        }
         public DbResult<bool> UseTran(Action action, Action<Exception> errorCallBack = null)
         {
             var result = new DbResult<bool>();
@@ -244,10 +321,10 @@ namespace SqlSugar
             var result = new DbResult<bool>();
             try
             {
-                this.BeginTran();
+                await this.BeginTranAsync();
                 if (action != null)
                     await action();
-                this.CommitTran();
+                await this.CommitTranAsync();
                 result.Data = result.IsSuccess = true;
             }
             catch (Exception ex)
@@ -255,7 +332,7 @@ namespace SqlSugar
                 result.ErrorException = ex;
                 result.ErrorMessage = ex.Message;
                 result.IsSuccess = false;
-                this.RollbackTran();
+                await this.RollbackTranAsync();
                 if (errorCallBack != null)
                 {
                     errorCallBack(ex);
@@ -363,6 +440,8 @@ namespace SqlSugar
                 int count = sqlCommand.ExecuteNonQuery();
                 if (this.IsClearParameters)
                     sqlCommand.Parameters.Clear();
+                // 影响条数
+                this.SqlExecuteCount = count;
                 ExecuteAfter(sql, parameters);
                 sqlCommand.Dispose();
                 return count;
@@ -413,7 +492,7 @@ namespace SqlSugar
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
-                throw ex;
+                throw;
             }
         }
         public virtual DataSet GetDataSetAll(string sql, params SugarParameter[] parameters)
@@ -446,7 +525,7 @@ namespace SqlSugar
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
-                throw ex;
+                throw;
             }
             finally
             {
@@ -482,7 +561,7 @@ namespace SqlSugar
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
-                throw ex;
+                throw;
             }
             finally
             {
@@ -513,6 +592,7 @@ namespace SqlSugar
                     count=await sqlCommand.ExecuteNonQueryAsync(this.CancellationToken.Value);
                 if (this.IsClearParameters)
                     sqlCommand.Parameters.Clear();
+                this.SqlExecuteCount = count;
                 ExecuteAfter(sql, parameters);
                 sqlCommand.Dispose();
                 return count;
@@ -523,7 +603,7 @@ namespace SqlSugar
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
-                throw ex;
+                throw;
             }
             finally
             {
@@ -568,7 +648,7 @@ namespace SqlSugar
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
-                throw ex;
+                throw;
             }
         }
         public virtual async Task<object> GetScalarAsync(string sql, params SugarParameter[] parameters)
@@ -604,7 +684,7 @@ namespace SqlSugar
                 CommandType = CommandType.Text;
                 if (ErrorEvent != null)
                     ExecuteErrorEvent(sql, parameters, ex);
-                throw ex;
+                throw;
             }
             finally
             {
@@ -615,8 +695,22 @@ namespace SqlSugar
         public virtual Task<DataSet> GetDataSetAllAsync(string sql, params SugarParameter[] parameters)
         {
             Async();
+
             //False asynchrony . No Support DataSet
-            return Task.FromResult(GetDataSetAll(sql, parameters));
+            if (CancellationToken == null)
+            {
+                return Task.Run(() =>
+                {
+                    return GetDataSetAll(sql, parameters);
+                });
+            }
+            else 
+            {
+                return Task.Run(() =>
+                {
+                    return GetDataSetAll(sql, parameters);
+                },this.CancellationToken.Value);
+            }
         }
         #endregion
 
@@ -857,6 +951,22 @@ namespace SqlSugar
             var result = SqlQuery<T, object, object, object, object, object, object>(sql, parameters);
             return result.Item1;
         }
+        public List<T> MasterSqlQuery<T>(string sql, object parameters = null) 
+        {
+            var oldValue = this.Context.Ado.IsDisableMasterSlaveSeparation;
+            this.Context.Ado.IsDisableMasterSlaveSeparation = true;
+            var result = this.Context.Ado.SqlQuery<T>(sql, parameters);
+            this.Context.Ado.IsDisableMasterSlaveSeparation = oldValue;
+            return result;
+        }
+        public async Task<List<T>> MasterSqlQueryAasync<T>(string sql, object parameters = null)
+        {
+            var oldValue = this.Context.Ado.IsDisableMasterSlaveSeparation;
+            this.Context.Ado.IsDisableMasterSlaveSeparation = true;
+            var result = await this.Context.Ado.SqlQueryAsync<T>(sql, parameters);
+            this.Context.Ado.IsDisableMasterSlaveSeparation = oldValue;
+            return result;
+        }
         public virtual List<T> SqlQuery<T>(string sql, List<SugarParameter> parameters)
         {
             if (parameters != null)
@@ -965,6 +1075,13 @@ namespace SqlSugar
                 return Tuple.Create<List<T>, List<T2>, List<T3>, List<T4>, List<T5>, List<T6>, List<T7>>(result, result2, result3, result4, result5, result6, result7);
             }
         }
+
+        public Task<List<T>> SqlQueryAsync<T>(string sql, object parameters, CancellationToken token) 
+        {
+            this.CancellationToken = token;
+            return SqlQueryAsync<T>(sql, parameters);
+        }
+
         public virtual Task<List<T>> SqlQueryAsync<T>(string sql, object parameters = null)
         {
             var sugarParameters = this.GetParameters(parameters);
@@ -1271,6 +1388,11 @@ namespace SqlSugar
                 return ExecuteCommand(sql, parameters.ToArray());
             }
         }
+        public Task<int> ExecuteCommandAsync(string sql, object parameters, CancellationToken cancellationToken) 
+        {
+            this.CancellationToken = CancellationToken;
+            return ExecuteCommandAsync(sql,parameters);
+        }
         public virtual Task<int> ExecuteCommandAsync(string sql, object parameters)
         {
             return ExecuteCommandAsync(sql, GetParameters(parameters));
@@ -1289,8 +1411,29 @@ namespace SqlSugar
         #endregion
 
         #region  Helper
+        public async Task CloseAsync()
+        {
+            if (this.Transaction != null)
+            {
+                this.Transaction = null;
+            }
+            if (this.Connection != null && this.Connection.State == ConnectionState.Open)
+            {
+                await (this.Connection as DbConnection).CloseAsync();
+            }
+            if (this.IsMasterSlaveSeparation && this.SlaveConnections.HasValue())
+            {
+                foreach (var slaveConnection in this.SlaveConnections)
+                {
+                    if (slaveConnection != null && slaveConnection.State == ConnectionState.Open)
+                    {
+                        await (slaveConnection as DbConnection).CloseAsync();
+                    }
+                }
+            }
+        }
 
-        private void SugarCatch(Exception ex, string sql, SugarParameter[] parameters)
+        protected virtual void SugarCatch(Exception ex, string sql, SugarParameter[] parameters)
         {
             if (sql != null && sql.Contains("{year}{month}{day}")) 
             {
@@ -1479,6 +1622,7 @@ namespace SqlSugar
 
         protected void ExecuteErrorEvent(string sql, SugarParameter[] parameters, Exception ex)
         {
+            this.AfterTime = DateTime.Now;
             ErrorEvent(new SqlSugarException(this.Context, ex, sql, parameters));
         }
         protected void InitParameters(ref string sql, SugarParameter[] parameters)
@@ -1490,7 +1634,7 @@ namespace SqlSugar
                     if (item.Value != null)
                     {
                         var type = item.Value.GetType();
-                        if ((type != UtilConstants.ByteArrayType && type.IsArray&&item.IsArray==false) || type.FullName.IsCollectionsList())
+                        if ((type != UtilConstants.ByteArrayType && type.IsArray&&item.IsArray==false) || type.FullName.IsCollectionsList()||type.IsIterator())
                         {
                             var newValues = new List<string>();
                             foreach (var inValute in item.Value as IEnumerable)
@@ -1505,9 +1649,18 @@ namespace SqlSugar
                             {
                                 sql = sql.Replace("@" + item.ParameterName.Substring(1), newValues.ToArray().ToJoinSqlInVals());
                             }
-                            if (item.ParameterName.Substring(0, 1) != this.SqlParameterKeyWord)
+                            if (item.ParameterName.Substring(0, 1) != this.SqlParameterKeyWord && sql.ObjToString().Contains(this.SqlParameterKeyWord + item.ParameterName))
                             {
-                                sql = sql.Replace(this.SqlParameterKeyWord+item.ParameterName, newValues.ToArray().ToJoinSqlInVals());
+                                sql = sql.Replace(this.SqlParameterKeyWord + item.ParameterName, newValues.ToArray().ToJoinSqlInVals());
+                            }
+                            else if (item.Value!=null&&UtilMethods.IsNumberArray(item.Value.GetType()))
+                            {
+                                if (newValues.Any(it => it == "")) 
+                                {
+                                    newValues.RemoveAll(r => r == "");
+                                    newValues.Add("null");
+                                }
+                                sql = sql.Replace(item.ParameterName, string.Join(",", newValues));
                             }
                             else
                             {
@@ -1516,9 +1669,18 @@ namespace SqlSugar
                             item.Value = DBNull.Value;
                         }
                     }
+                    if (item.ParameterName != null && item.ParameterName.Contains(" ")) 
+                    {
+                        var oldName = item.ParameterName;
+                        item.ParameterName = item.ParameterName.Replace(" ", "");
+                        sql = sql.Replace(oldName, item.ParameterName);
+                    }
                 }
             }
         }
+
+ 
+
         private List<TResult> GetData<TResult>(Type entityType, IDataReader dataReader)
         {
             List<TResult> result;
@@ -1530,9 +1692,16 @@ namespace SqlSugar
             {
                 result = this.Context.Utilities.DataReaderToExpandoObjectListNoUsing(dataReader).Select(it => ((TResult)(object)it)).ToList();
             }
-            else if (entityType.IsAnonymousType())
+            else if (entityType.IsAnonymousType()||StaticConfig.EnableAot)
             {
-                result = this.Context.Utilities.DataReaderToListNoUsing<TResult>(dataReader);
+                if (StaticConfig.EnableAot&& entityType==UtilConstants.StringType)
+                {
+                    result = this.Context.Ado.DbBind.DataReaderToListNoUsing<TResult>(entityType, dataReader);
+                }
+                else
+                {
+                    result = this.Context.Utilities.DataReaderToListNoUsing<TResult>(dataReader);
+                }
             }
             else
             {
@@ -1552,9 +1721,16 @@ namespace SqlSugar
                 var list = await this.Context.Utilities.DataReaderToExpandoObjectListAsyncNoUsing(dataReader);
                 result = list.Select(it => ((TResult)(object)it)).ToList();
             }
-            else if (entityType.IsAnonymousType())
+            else if (entityType.IsAnonymousType() || StaticConfig.EnableAot)
             {
-                result =await this.Context.Utilities.DataReaderToListAsyncNoUsing<TResult>(dataReader);
+                if (StaticConfig.EnableAot && entityType == UtilConstants.StringType)
+                {
+                    result =  await this.Context.Ado.DbBind.DataReaderToListNoUsingAsync<TResult>(entityType, dataReader);
+                }
+                else
+                {
+                    result =await this.Context.Utilities.DataReaderToListAsyncNoUsing<TResult>(dataReader);
+                }
             }
             else
             {

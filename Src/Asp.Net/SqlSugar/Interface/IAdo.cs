@@ -20,6 +20,8 @@ namespace SqlSugar
         SqlSugarProvider Context { get; set; }
         void ExecuteBefore(string sql, SugarParameter[] pars);
         void ExecuteAfter(string sql, SugarParameter[] pars);
+        bool IsAnyTran();
+        bool IsNoTran();
         bool IsEnableLogEvent{get;set;}
         StackTraceInfo SqlStackTrace { get; }
         IDataParameterCollection DataReaderParameters { get; set; }
@@ -29,6 +31,7 @@ namespace SqlSugar
         bool IsClearParameters { get; set; }
         int CommandTimeOut { get; set; }
         TimeSpan SqlExecutionTime { get; }
+        int SqlExecuteCount { get; }
         IDbBind DbBind { get; }
         void SetCommandToAdapter(IDataAdapter adapter, DbCommand command);
         IDataAdapter GetAdapter();
@@ -76,6 +79,7 @@ namespace SqlSugar
 
         Task<int> ExecuteCommandAsync(string sql, params SugarParameter[] parameters);
         Task<int> ExecuteCommandAsync(string sql, object parameters);
+        Task<int> ExecuteCommandAsync(string sql, object parameters,CancellationToken cancellationToken);
         Task<int> ExecuteCommandAsync(string sql, List<SugarParameter> parameters);
 
         string GetString(string sql, object parameters);
@@ -145,8 +149,11 @@ namespace SqlSugar
         List<T> SqlQuery<T>(string sql, object parameters = null);
         List<T> SqlQuery<T>(string sql, params SugarParameter[] parameters);
         List<T> SqlQuery<T>(string sql, List<SugarParameter> parameters);
+        Task<List<T>> MasterSqlQueryAasync<T>(string sql, object parameters = null);
+        List<T> MasterSqlQuery<T>(string sql, object parameters = null);
 
         Task<List<T>> SqlQueryAsync<T>(string sql, object parameters = null);
+        Task<List<T>> SqlQueryAsync<T>(string sql, object parameters,CancellationToken token);
         Task<List<T>> SqlQueryAsync<T>(string sql, List<SugarParameter> parameters);
         Task<List<T>> SqlQueryAsync<T>(string sql, params SugarParameter[] parameters);
 
@@ -165,15 +172,20 @@ namespace SqlSugar
         void Open();
         SugarConnection OpenAlways();
         bool IsValidConnection();
+        bool IsValidConnectionNoClose();
         void CheckConnection();
 
         void BeginTran();
+        Task BeginTranAsync();
+        Task BeginTranAsync(IsolationLevel iso);
         void BeginTran(IsolationLevel iso);
         void BeginTran(string transactionName);
         void BeginTran(IsolationLevel iso, string transactionName);
         void RollbackTran();
+        Task RollbackTranAsync();
         void CommitTran();
-
+        Task CommitTranAsync();
+        SqlSugarTransactionAdo UseTran();
         DbResult<bool> UseTran(Action action, Action<Exception> errorCallBack = null);
         DbResult<T> UseTran<T>(Func<T> action, Action<Exception> errorCallBack = null);
         Task<DbResult<bool>> UseTranAsync(Func<Task> action, Action<Exception> errorCallBack = null);

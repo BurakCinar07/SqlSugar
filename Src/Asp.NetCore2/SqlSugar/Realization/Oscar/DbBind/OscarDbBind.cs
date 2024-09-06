@@ -6,6 +6,14 @@ namespace SqlSugar
 {
     public class OscarDbBind : DbBindProvider
     {
+        public override string GetDbTypeName(string csharpTypeName)
+        {
+            if (csharpTypeName == UtilConstants.ByteArrayType.Name)
+                return "bytea";
+
+            var result= base.GetDbTypeName(csharpTypeName);
+            return result;
+        }
         public override string GetPropertyTypeName(string dbTypeName)
         {
             dbTypeName = dbTypeName.ToLower();
@@ -62,6 +70,7 @@ namespace SqlSugar
         public static List<KeyValuePair<string, CSharpDataType>> MappingTypesConst = new List<KeyValuePair<string, CSharpDataType>>(){
 
                     new KeyValuePair<string, CSharpDataType>("int2",CSharpDataType.@short),
+                    new KeyValuePair<string, CSharpDataType>("int1",CSharpDataType.@byte),
                     new KeyValuePair<string, CSharpDataType>("smallint",CSharpDataType.@short),
                     new KeyValuePair<string, CSharpDataType>("int4",CSharpDataType.@int),
                     new KeyValuePair<string, CSharpDataType>("integer",CSharpDataType.@int),
@@ -80,7 +89,7 @@ namespace SqlSugar
                     new KeyValuePair<string, CSharpDataType>("boolean",CSharpDataType.@bool),
                     new KeyValuePair<string, CSharpDataType>("bool",CSharpDataType.@bool),
                     new KeyValuePair<string, CSharpDataType>("box",CSharpDataType.@bool),
-                    new KeyValuePair<string, CSharpDataType>("bytea",CSharpDataType.@bool),
+                    new KeyValuePair<string, CSharpDataType>("bytea",CSharpDataType.byteArray),
 
                     new KeyValuePair<string, CSharpDataType>("varchar",CSharpDataType.@string),
                     new KeyValuePair<string, CSharpDataType>("character varying",CSharpDataType.@string),

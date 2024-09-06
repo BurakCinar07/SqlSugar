@@ -21,8 +21,11 @@ namespace SqlSugar
         private bool IsDefaultValue { get; set; }
         private Func<string, bool> WhereColumnsfunc;
         private Func<string, string> FormatFileNameFunc { get; set; }
+        private Func<string, string> FormatClassNameFunc { get; set; }
+        private Func<string, string> FormatPropertyNameFunc { get; set; }
         private bool IsStringNullable {get;set; }
         private Func<DbColumnInfo,string,string,string> PropertyTextTemplateFunc { get; set; }
+        private Func<string, string> ReplaceClassStringFunc { get; set; }
         private ISqlBuilder SqlBuilder
         {
             get
@@ -166,6 +169,21 @@ namespace SqlSugar
             this.FormatFileNameFunc = formatFileNameFunc;
             return this;
         }
+        public IDbFirst FormatClassName(Func<string, string> formatClassNameFunc) 
+        {
+            this.FormatClassNameFunc = formatClassNameFunc;
+            return this;
+        }
+        public IDbFirst FormatPropertyName(Func<string, string> formatPropertyNameFunc) 
+        {
+            this.FormatPropertyNameFunc = formatPropertyNameFunc;
+            return this;
+        }
+        public IDbFirst CreatedReplaceClassString(Func<string, string> replaceClassStringFunc) 
+        {
+            this.ReplaceClassStringFunc = replaceClassStringFunc;
+            return this;
+        }
         public IDbFirst IsCreateDefaultValue(bool isCreateDefaultValue = true)
         {
             this.IsDefaultValue = isCreateDefaultValue;
@@ -217,8 +235,17 @@ namespace SqlSugar
                     {
                         string classText = null;
                         string className = tableInfo.Name;
+                        var oldClasName = className;
                         classText = GetClassString(tableInfo, ref className);
                         result.Remove(className);
+                        if (this.ReplaceClassStringFunc != null) 
+                        {
+                            classText=this.ReplaceClassStringFunc(classText);
+                        }
+                        if (FormatClassNameFunc != null&&FormatFileNameFunc != null) 
+                        {
+                            className = oldClasName;
+                        }
                         result.Add(className, classText);
                     }
                     catch (Exception ex)
@@ -255,10 +282,14 @@ namespace SqlSugar
                     classText = classText.Replace(DbFirstTemplate.KeyClassName, mappingInfo.EntityName);
                 }
             }
+            if (FormatClassNameFunc != null) 
+            {
+                className=FormatClassNameFunc(className);
+            }
             classText = classText.Replace(DbFirstTemplate.KeyClassName, className);
             classText = classText.Replace(DbFirstTemplate.KeyNamespace, this.Namespace);
             classText = classText.Replace(DbFirstTemplate.KeyUsing, IsAttribute ? (this.UsingTemplate + "using " + UtilConstants.AssemblyName + ";\r\n") : this.UsingTemplate);
-            classText = classText.Replace(DbFirstTemplate.KeyClassDescription, this.ClassDescriptionTemplate.Replace(DbFirstTemplate.KeyClassDescription, tableInfo.Description + "\r\n"));
+            classText = classText.Replace(DbFirstTemplate.KeyClassDescription, this.ClassDescriptionTemplate.Replace(DbFirstTemplate.KeyClassDescription, tableInfo.Description?.Replace(Environment.NewLine,"\t") + "\r\n"));
             classText = classText.Replace(DbFirstTemplate.KeySugarTable, IsAttribute ? string.Format(DbFirstTemplate.ValueSugarTable, tableInfo.Name) : null);
             if (columns.HasValue())
             {
@@ -268,21 +299,53 @@ namespace SqlSugar
                     var index = columns.IndexOf(item);
                     string PropertyText = this.PropertyTemplate;
                     string PropertyDescriptionText = this.PropertyDescriptionTemplate;
-                    string propertyName = GetPropertyName(item);
+                    string propertyName = GetPropertyName(item); 
+                    var oldPropertyName = propertyName;
+                    if (FormatPropertyNameFunc != null) 
+                    {
+                      item.DbColumnName=propertyName = FormatPropertyNameFunc(propertyName);
+                    }
                     string propertyTypeName = GetPropertyTypeName(item);
                     PropertyText =this.PropertyTextTemplateFunc == null? GetPropertyText(item, PropertyText):this.PropertyTextTemplateFunc(item,this.PropertyTemplate, propertyTypeName);
                     PropertyDescriptionText = GetPropertyDescriptionText(item, PropertyDescriptionText);
+                    if (this.IsAttribute && item.DataType?.StartsWith("_") == true && PropertyText.Contains("[]"))
+                    {
+                        PropertyDescriptionText += "\r\n           [SugarColumn(IsArray=true)]";
+                    }
+                    else if (item?.DataType?.StartsWith("json") == true)
+                    {
+                        PropertyDescriptionText += "\r\n           [SugarColumn(IsJson=true)]";
+                    }
+                    else if (FormatPropertyNameFunc != null) 
+                    {
+                        if (PropertyText.Contains("SugarColumn"))
+                        { 
+                            PropertyText  = PropertyText.Replace(")]", ",ColumnName=\"" + oldPropertyName + "\")]");
+                        }
+                        else
+                        {
+                            PropertyDescriptionText += "\r\n           [SugarColumn(ColumnName=\"" + oldPropertyName + "\")]";
+                        }
+                    }
                     PropertyText = PropertyDescriptionText + PropertyText;
                     classText = classText.Replace(DbFirstTemplate.KeyPropertyName, PropertyText + (isLast ? "" : ("\r\n" + DbFirstTemplate.KeyPropertyName)));
-                    if (ConstructorText.HasValue() && item.DefaultValue != null)
+                    if (ConstructorText.HasValue() && item.DefaultValue != null&&item.IsIdentity!=true)
                     {
                         var hasDefaultValue = columns.Skip(index + 1).Any(it => it.DefaultValue.HasValue());
+                        if (item.DefaultValue.EqualCase("CURRENT_TIMESTAMP"))
+                        {
+                            item.DefaultValue = "DateTime.Now";
+                        }
+                        else if (item.DefaultValue == "b'1'") 
+                        {
+                            item.DefaultValue = "1";
+                        }
                         ConstructorText = ConstructorText.Replace(DbFirstTemplate.KeyPropertyName, propertyName);
                         ConstructorText = ConstructorText.Replace(DbFirstTemplate.KeyDefaultValue, GetPropertyTypeConvert(item)) + (!hasDefaultValue ? "" : this.ConstructorTemplate);
                     }
                 }
             }
-            if (!columns.Any(it => it.DefaultValue != null))
+            if (!columns.Any(it => it.DefaultValue != null&&it.IsIdentity==false))
             {
                 ConstructorText = null;
             }
@@ -407,6 +470,10 @@ namespace SqlSugar
             PropertyText = PropertyText.Replace(DbFirstTemplate.KeySugarColumn, SugarColumnText);
             PropertyText = PropertyText.Replace(DbFirstTemplate.KeyPropertyType, typeString);
             PropertyText = PropertyText.Replace(DbFirstTemplate.KeyPropertyName, propertyName);
+            if (typeString == "string"&&this.IsStringNullable&&item.IsNullable==false&&PropertyText.EndsWith("{get;set;}\r\n")) 
+            {
+                PropertyText=PropertyText.Replace("{get;set;}\r\n", "{get;set;} = null!;\r\n");
+            }
             return PropertyText;
         }
         private string GetEnityName(DbColumnInfo item)
@@ -426,7 +493,7 @@ namespace SqlSugar
                 return item.DbColumnName;
             }
         }
-        private string GetPropertyTypeName(DbColumnInfo item)
+        protected virtual string GetPropertyTypeName(DbColumnInfo item)
         {
             string result = item.PropertyType != null ? item.PropertyType.Name : this.Context.Ado.DbBind.GetPropertyTypeName(item.DataType);
             if (result != "string" && result != "byte[]" && result != "object" && item.IsNullable)
@@ -445,6 +512,42 @@ namespace SqlSugar
             {
                 result = result + "?";
             }
+            if (item.OracleDataType.EqualCase("raw") && item.Length == 16) 
+            {
+                return "Guid";
+            }
+            if (item.OracleDataType.EqualCase("number") && item.Length == 1&&item.Scale==0)
+            {
+                return "bool";
+            }
+            if (result.EqualCase("char")|| result.EqualCase("char?")) 
+            {
+                return "string";
+            }
+            if (item.DataType == "tinyint unsigned") 
+            {
+                return "short"; 
+            }
+            if (item.DataType == "smallint unsigned")
+            {
+                return "ushort";
+            }
+            if (item.DataType == "bigint unsigned")
+            {
+                return "ulong";
+            }
+            if (item.DataType == "int unsigned")
+            {
+                return "uint";
+            }
+            if (item.DataType == "MediumInt")
+            {
+                return "int";
+            }
+            if (item.DataType == "MediumInt unsigned")
+            {
+                return "uint";
+            }
             return result;
         }
         private string GetPropertyTypeConvert(DbColumnInfo item)
@@ -456,9 +559,21 @@ namespace SqlSugar
             {
                 return "Guid.NewGuid()";
             }
+            if (item.DataType?.ToString()?.EndsWith("unsigned")==true) 
+            {
+                return convertString;
+            }
             if (item.DataType == "bit")
                 return (convertString == "1" || convertString.Equals("true", StringComparison.CurrentCultureIgnoreCase)).ToString().ToLower();
+            if (convertString.EqualCase("NULL")) 
+            {
+                return "null";
+            }
             string result = this.Context.Ado.DbBind.GetConvertString(item.DataType) + "(\"" + convertString + "\")";
+            if (this.SqlBuilder.SqlParameterKeyWord == ":"&&!string.IsNullOrEmpty(item.OracleDataType)) 
+            {
+                result = this.Context.Ado.DbBind.GetConvertString(item.OracleDataType) + "(\"" + convertString + "\")";
+            }
             return result;
         }
         private string GetPropertyDescriptionText(DbColumnInfo item, string propertyDescriptionText)
@@ -473,6 +588,7 @@ namespace SqlSugar
             if (columnDescription == null) return columnDescription;
             columnDescription = columnDescription.Replace("\r", "\t");
             columnDescription = columnDescription.Replace("\n", "\t");
+            columnDescription = columnDescription.Replace(Environment.NewLine, "\t");
             columnDescription = Regex.Replace(columnDescription, "\t{2,}", "\t");
             return columnDescription;
         }

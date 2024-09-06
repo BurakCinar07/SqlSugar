@@ -5,11 +5,12 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SqlSugar
 {
-    public class UpdateableProvider<T> : IUpdateable<T> where T : class, new()
+    public partial class UpdateableProvider<T> : IUpdateable<T> where T : class, new()  
     {
         #region Property
         public SqlSugarProvider Context { get; internal set; }
@@ -18,13 +19,17 @@ namespace SqlSugar
         public UpdateBuilder UpdateBuilder { get; set; }
         public IAdo Ado { get { return Context.Ado; } }
         public T[] UpdateObjs { get; set; }
+        /// <summary>
+        /// true : by expression  update
+        /// false: by object update
+        /// </summary>
         public bool UpdateParameterIsNull { get; set; }
         public bool IsMappingTable { get { return this.Context.MappingTables != null && this.Context.MappingTables.Any(); } }
         public bool IsMappingColumns { get { return this.Context.MappingColumns != null && this.Context.MappingColumns.Any(); } }
         public bool IsSingle { get { return this.UpdateObjs.Length == 1; } }
         public List<MappingColumn> MappingColumnList { get; set; }
         private List<string> IgnoreColumnNameList { get; set; }
-        private List<string> WhereColumnList { get; set; }
+        internal List<string> WhereColumnList { get; set; }
         private bool IsWhereColumns { get; set; }
         private bool IsOffIdentity { get; set; }
         private bool IsVersionValidation { get; set; }
@@ -59,38 +64,223 @@ namespace SqlSugar
             var sqlObj = this.ToSql();
             this.Context.Queues.Add(sqlObj.Key, sqlObj.Value);
         }
+        public virtual int ExecuteCommandWithOptLockIF(bool? IsVersionValidation ,bool? IsOptLock=null) 
+        {
+            if (IsOptLock==true)
+            {
+                return ExecuteCommandWithOptLock(IsVersionValidation??false);
+            }
+            else 
+            {
+                return this.ExecuteCommand();
+            }
+        }
+        public virtual int ExecuteCommandWithOptLock(bool IsVersionValidation=false)
+        {
+            Check.ExceptionEasy(UpdateObjs?.Length>1, " OptLock can only be used on a single object, and the argument cannot be List", "乐观锁只能用于单个对象,参数不能是List,如果是一对多操作请更新主表统一用主表验证");
+            var updateData = UpdateObjs.FirstOrDefault();
+            if (updateData == null) return 0;
+            object oldValue = null;
+            var name=_ExecuteCommandWithOptLock(updateData,ref oldValue);
+            var result= this.ExecuteCommand();
+            OptRollBack(result,updateData, oldValue, name);
+            if (result == 0 && IsVersionValidation)
+            {
+                throw new VersionExceptions(string.Format("UpdateVersionValidation {0} Not the latest version ", name));
+            }
+            return result;
+        }
+
         public virtual int ExecuteCommand()
         {
+            //if (this.UpdateBuilder.UpdateColumns.HasValue())
+            //{
+            //    var columns = this.UpdateBuilder.UpdateColumns;
+            //    this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => GetPrimaryKeys().Select(iit => iit.ToLower()).Contains(it.DbColumnName.ToLower()) || columns.Contains(it.PropertyName, StringComparer.OrdinalIgnoreCase)).ToList();
+            //}
+            if (this.IsTrakingDatas() || IsUpdateNullByList())
+            {
+                int trakRows = DatasTrackingExecommand();
+                return trakRows;
+            }
             string sql = _ExecuteCommand();
+            if (this.UpdateBuilder.AppendWhere.HasValue()) 
+            {
+                sql += " AND "+ this.UpdateBuilder.AppendWhere;
+            }
             if (string.IsNullOrEmpty(sql))
             {
                 return 0;
             }
-            var result = this.Ado.ExecuteCommand(sql, UpdateBuilder.Parameters == null ? null : UpdateBuilder.Parameters.ToArray());
+            var result = 0;
+            if (this.Context.CurrentConnectionConfig?.MoreSettings?.IsCorrectErrorSqlParameterName == true) 
+            {
+                UpdateBuilder.Parameters = UpdateBuilder.Parameters.Where(it => UtilMethods.NoErrorParameter(it.ParameterName)).ToList();
+            }
+            List<SugarParameter> oldParas = null;
+            if (IsEnableDiffLogEvent)
+            {
+                oldParas=UtilMethods.CopySugarParameters(UpdateBuilder.Parameters);
+            }
+            if (sql != Environment.NewLine)
+            {
+                result = this.Ado.ExecuteCommand(sql, UpdateBuilder.Parameters == null ? null : UpdateBuilder.Parameters.ToArray());
+            }
+            if (oldParas != null&& UpdateBuilder.Parameters!=null) 
+            {
+                if (string.Join(",", oldParas.Select(it => it.ParameterName)) != string.Join(",", UpdateBuilder.Parameters.Select(it => it.ParameterName)))
+                {
+                    UpdateBuilder.Parameters = oldParas;
+                }
+            }
             After(sql);
             return result;
-        }
+        } 
         public bool ExecuteCommandHasChange()
         {
             return this.ExecuteCommand() > 0;
         }
+
+        public virtual async Task<int> ExecuteCommandWithOptLockAsync(bool IsVersionValidation = false)
+        {
+            Check.ExceptionEasy(UpdateObjs?.Length > 1, " OptLock can only be used on a single object, and the argument cannot be List", "乐观锁只能用于单个对象,参数不能是List,如果是一对多操作请更新主表统一用主表验证");
+            var updateData = UpdateObjs.FirstOrDefault();
+            if (updateData == null) return 0;
+            object oldValue = null;
+            var name=_ExecuteCommandWithOptLock(updateData,ref oldValue);
+            var result= await this.ExecuteCommandAsync();
+            OptRollBack(result,updateData, oldValue, name);
+            if (result == 0 && IsVersionValidation) 
+            {
+                throw new VersionExceptions(string.Format("UpdateVersionValidation {0} Not the latest version ", name));
+            }
+            return result;
+        }
+        public Task<int> ExecuteCommandAsync(CancellationToken token) 
+        {
+            this.Context.Ado.CancellationToken= token;
+            return ExecuteCommandAsync();
+        }
         public virtual async Task<int> ExecuteCommandAsync()
         {
+            //if (this.UpdateBuilder.UpdateColumns.HasValue())
+            //{
+            //    var columns = this.UpdateBuilder.UpdateColumns;
+            //    this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => GetPrimaryKeys().Select(iit => iit.ToLower()).Contains(it.DbColumnName.ToLower()) || columns.Contains(it.PropertyName, StringComparer.OrdinalIgnoreCase)).ToList();
+            //}
+            if (this.IsTrakingDatas()||IsUpdateNullByList())
+            {
+                int trakRows =await DatasTrackingExecommandAsync();
+                return trakRows;
+            }
             string sql = _ExecuteCommand();
+            if (this.UpdateBuilder.AppendWhere.HasValue())
+            {
+                sql += " AND " + this.UpdateBuilder.AppendWhere;
+            }
             if (string.IsNullOrEmpty(sql))
             {
                 return 0;
             }
             var result = await this.Ado.ExecuteCommandAsync(sql, UpdateBuilder.Parameters == null ? null : UpdateBuilder.Parameters.ToArray());
-            After(sql);
+            After(sql); 
             return result;
         }
+        public Task<bool> ExecuteCommandHasChangeAsync(CancellationToken token) 
+        {
+            this.Context.Ado.CancellationToken= token;
+            return ExecuteCommandHasChangeAsync();
+        }
+
         public async Task<bool> ExecuteCommandHasChangeAsync()
         {
             return await this.ExecuteCommandAsync() > 0;
         }
         #endregion
 
+        #region Common
+        public UpdateablePage<T> PageSize(int pageSize) 
+        {
+            ThrowUpdateByExpressionByMesage(" PageSize(num) ");
+            UpdateablePage<T> result = new UpdateablePage<T>();
+            result.PageSize = pageSize;
+            result.Context = this.Context;
+            result.DataList = this.UpdateObjs;
+            result.TableName = this.UpdateBuilder.TableName;
+            result.IsEnableDiffLogEvent = this.IsEnableDiffLogEvent;
+            result.WhereColumnList = this.WhereColumnList?.ToArray();
+            result.DiffModel = this.diffModel;
+            if (this.UpdateBuilder.DbColumnInfoList.Any())
+                result.UpdateColumns = this.UpdateBuilder.DbColumnInfoList.GroupBy(it => it.TableId).First().Select(it => it.DbColumnName).ToList();
+            if(this.UpdateBuilder?.UpdateColumns?.Any()==true)
+                result.UpdateColumns = this.UpdateBuilder.UpdateColumns;
+            return result;
+        }
+        public IUpdateable<T, T2> InnerJoin<T2>(Expression<Func<T, T2, bool>> joinExpress) 
+        {
+            UpdateableProvider<T, T2> result = new UpdateableProvider<T, T2>();
+            result.updateableObj = this;
+            var querybale=this.Context.Queryable<T>().LeftJoin<T2>(joinExpress);
+            result.updateableObj.UpdateBuilder.JoinInfos = querybale.QueryBuilder.JoinQueryInfos;
+            result.updateableObj.UpdateBuilder.ShortName = joinExpress.Parameters.FirstOrDefault()?.Name;
+            return result;
+        }
+        public IUpdateable<T, T2> InnerJoin<T2>(ISugarQueryable<T> queryable, Expression<Func<T, T2, bool>> joinExpress) 
+        {
+            var tableName=$" ({queryable.Clone().ToSqlString()}) ";;
+            return this.InnerJoin(joinExpress, tableName);
+        }
+        public IUpdateable<T, T2> InnerJoin<T2>(Expression<Func<T, T2, bool>> joinExpress,string TableName)
+        {
+            UpdateableProvider<T, T2> result = new UpdateableProvider<T, T2>();
+            result.updateableObj = this;
+            var querybale = this.Context.Queryable<T>().LeftJoin<T2>(joinExpress);
+            result.updateableObj.UpdateBuilder.JoinInfos = querybale.QueryBuilder.JoinQueryInfos;
+            result.updateableObj.UpdateBuilder.ShortName = joinExpress.Parameters.FirstOrDefault()?.Name;
+            result.updateableObj.UpdateBuilder.TableName = TableName;
+            return result;
+        }
+        public IUpdateable<T> Clone() 
+        {
+            this.Context.SugarActionType = SugarActionType.Update;
+            var result = InstanceFactory.GetUpdateableProvider<T>(this.Context.CurrentConnectionConfig);
+            var sqlBuilder = InstanceFactory.GetSqlbuilder(this.Context.CurrentConnectionConfig); ;
+            result.Context = this.Context;
+            result.EntityInfo = this.Context.EntityMaintenance.GetEntityInfo<T>();
+            result.SqlBuilder = sqlBuilder;
+            result.SqlBuilder.Context = this.Context;
+            result.UpdateObjs = UpdateObjs;
+            result.WhereColumnList= this.WhereColumnList;
+            result.IsWhereColumns = this.IsWhereColumns;
+            result.IgnoreColumnNameList= this.IgnoreColumnNameList;
+            result.IsAs = this.IsAs;
+            result.IsOffIdentity= this.IsOffIdentity;
+            result.IsEnableDiffLogEvent= this.IsEnableDiffLogEvent;
+            result.diffModel = this.diffModel;
+            result.UpdateParameterIsNull= this.UpdateParameterIsNull;
+            result.RemoveCacheFunc= this.RemoveCacheFunc;
+            result.SetColumnsIndex = this.SetColumnsIndex;
+            result.OldMappingTableList= this.OldMappingTableList;
+            result.MappingColumnList= this.MappingColumnList;
+            result.columns = this.columns.ToList();
+            result.UpdateBuilder = InstanceFactory.GetUpdateBuilder(this.Context.CurrentConnectionConfig);
+            result.UpdateBuilder.Builder = sqlBuilder;
+            result.UpdateBuilder.LambdaExpressions = InstanceFactory.GetLambdaExpressions(this.Context.CurrentConnectionConfig);
+            result.Context=this.Context;
+            result.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.ToList();
+            result.UpdateBuilder.TableName= this.UpdateBuilder.TableName;
+            result.UpdateBuilder.WhereValues = this.UpdateBuilder?.WhereValues?.ToList();
+            result.UpdateBuilder.Parameters= this.UpdateBuilder?.Parameters?.ToList();
+            result.UpdateBuilder.IsListUpdate= this.UpdateBuilder.IsListUpdate;
+            result.UpdateBuilder.IsWhereColumns= this.UpdateBuilder.IsWhereColumns;
+            result.UpdateBuilder.WhereValues=this.UpdateBuilder?.WhereValues?.ToList();
+            result.UpdateBuilder.IsNoUpdateDefaultValue = this.UpdateBuilder.IsNoUpdateDefaultValue;
+            result.UpdateBuilder.IsNoUpdateNull= this.UpdateBuilder.IsNoUpdateNull;
+            result.UpdateBuilder.SetValues= this.UpdateBuilder?.SetValues?.ToList();
+            result.UpdateBuilder.UpdateColumns = this.UpdateBuilder?.UpdateColumns?.ToList();
+            result.UpdateBuilder.Context = this.Context;
+            return result;
+        }
         public IUpdateable<T> With(string lockString)
         {
             if (this.Context.CurrentConnectionConfig.DbType == DbType.SqlServer)
@@ -99,6 +289,7 @@ namespace SqlSugar
         }
         public SplitTableUpdateProvider<T> SplitTable(Func<List<SplitTableInfo>, IEnumerable<SplitTableInfo>> getTableNamesFunc)
         {
+            UtilMethods.StartCustomSplitTable(this.Context, typeof(T));
             this.Context.MappingTables.Add(this.EntityInfo.EntityName, this.EntityInfo.DbTableName);
             SplitTableUpdateProvider<T> result = new SplitTableUpdateProvider<T>();
             result.Context = this.Context;
@@ -108,15 +299,20 @@ namespace SqlSugar
             };
             var tables = getTableNamesFunc(helper.GetTables());
             result.Tables = tables;
-            result.updateobj= this;
+            result.updateobj = this;
             return result;
         }
         public SplitTableUpdateByObjectProvider<T> SplitTable()
         {
+            UtilMethods.StartCustomSplitTable(this.Context, typeof(T));
             Check.ExceptionEasy(UpdateParameterIsNull, "SplitTable() not supported db.Updateable<T>(),use db.Updateable(list)", ".SplitTable()不支持 db.Updateable<T>()方式更新,请使用 db.Updateable(list) 对象方式更新, 或者使用 .SplitTable(+1)重载");
             SplitTableUpdateByObjectProvider<T> result = new SplitTableUpdateByObjectProvider<T>();
             result.Context = this.Context;
             result.UpdateObjects = this.UpdateObjs;
+            result.IsEnableDiffLogEvent = this.IsEnableDiffLogEvent;
+            result.BusinessData = this.diffModel?.BusinessData;
+            if(this.IsWhereColumns)
+              result.WhereColumns = this.WhereColumnList;
             SplitTableContext helper = new SplitTableContext(Context)
             {
                 EntityInfo = this.EntityInfo
@@ -138,7 +334,7 @@ namespace SqlSugar
             this.RemoveCacheFunc = () =>
             {
                 var cacheService = this.Context.CurrentConnectionConfig.ConfigureExternalServices.DataInfoCacheService;
-                CacheSchemeMain.RemoveCacheByLike(cacheService,likeString);
+                CacheSchemeMain.RemoveCacheByLike(cacheService, likeString);
             };
             return this;
         }
@@ -147,19 +343,34 @@ namespace SqlSugar
             this.IsVersionValidation = true;
             return this;
         }
+        public IUpdateable<T> AsType(Type tableNameType) 
+        {
+            return AS(this.Context.EntityMaintenance.GetEntityInfo(tableNameType).DbTableName);
+        }
         public IUpdateable<T> AS(string tableName)
         {
-            if (tableName == null) return this;
-            var entityName = typeof(T).Name;
-            IsAs = true;
-            OldMappingTableList = this.Context.MappingTables;
-            this.Context.MappingTables = this.Context.Utilities.TranslateCopy(this.Context.MappingTables);
-            if (this.Context.MappingTables.Any(it => it.EntityName == entityName))
-            {
-                this.Context.MappingTables.Add(this.Context.MappingTables.First(it => it.EntityName == entityName).DbTableName, tableName);
-            }
-            this.Context.MappingTables.Add(entityName, tableName);
+            //if (tableName == null) return this;
+            //var entityName = typeof(T).Name;
+            //IsAs = true;
+            //OldMappingTableList = this.Context.MappingTables;
+            //this.Context.MappingTables = this.Context.Utilities.TranslateCopy(this.Context.MappingTables);
+            //if (this.Context.MappingTables.Any(it => it.EntityName == entityName))
+            //{
+            //    this.Context.MappingTables.Add(this.Context.MappingTables.First(it => it.EntityName == entityName).DbTableName, tableName);
+            //}
+            //this.Context.MappingTables.Add(entityName, tableName);
+            this.UpdateBuilder.TableName = tableName;
+            if (tableName.IsNullOrEmpty())
+                this.UpdateBuilder.TableName = this.EntityInfo.DbTableName;
             return this; ;
+        }
+        public IUpdateable<T> EnableDiffLogEventIF(bool isEnableDiffLog, object businessData = null) 
+        {
+            if (isEnableDiffLog) 
+            {
+                return EnableDiffLogEvent(businessData);
+            }
+            return this;
         }
         public IUpdateable<T> EnableDiffLogEvent(object businessData = null)
         {
@@ -175,7 +386,7 @@ namespace SqlSugar
 
         public IUpdateable<T> IgnoreColumns(bool ignoreAllNullColumns, bool isOffIdentity = false, bool ignoreAllDefaultValue = false)
         {
-            Check.Exception(this.UpdateObjs.Count() > 1 && ignoreAllNullColumns, ErrorMessage.GetThrowMessage("ignoreNullColumn NoSupport batch insert", "ignoreNullColumn 不支持批量操作"));
+            //Check.Exception(this.UpdateObjs.Count() > 1 && ignoreAllNullColumns, ErrorMessage.GetThrowMessage("ignoreNullColumn NoSupport batch insert", "ignoreNullColumn 不支持批量操作"));
             UpdateBuilder.IsOffIdentity = isOffIdentity;
             if (this.UpdateBuilder.LambdaExpressions == null)
                 this.UpdateBuilder.LambdaExpressions = InstanceFactory.GetLambdaExpressions(this.Context.CurrentConnectionConfig);
@@ -188,6 +399,7 @@ namespace SqlSugar
             var ignoreColumns = UpdateBuilder.GetExpressionValue(columns, ResolveExpressType.ArraySingle).GetResultArray().Select(it => this.SqlBuilder.GetNoTranslationColumnName(it).ToLower()).ToList();
             this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => !ignoreColumns.Contains(it.PropertyName.ToLower())).ToList();
             this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => !ignoreColumns.Contains(it.DbColumnName.ToLower())).ToList();
+            this.UpdateBuilder.IgnoreColumns = ignoreColumns;
             return this;
         }
         public IUpdateable<T> IgnoreColumnsIF(bool IsIgnore, Expression<Func<T, object>> columns)
@@ -195,11 +407,23 @@ namespace SqlSugar
             if (IsIgnore) this.IgnoreColumns(columns);
             return this;
         }
+        public IUpdateable<T> IgnoreNullColumns(bool isIgnoreNull = true) 
+        {
+            if (isIgnoreNull)
+            {
+                return IgnoreColumns(isIgnoreNull);
+            }
+            else
+            {
+                return this;
+            }
+        }
         public IUpdateable<T> IgnoreColumns(string[] columns)
         {
             if (columns.HasValue())
             {
                 var ignoreColumns = columns.Select(it => it.ToLower()).ToList();
+                this.UpdateBuilder.IgnoreColumns = ignoreColumns;
                 this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => !ignoreColumns.Contains(it.PropertyName.ToLower())).ToList();
                 this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => !ignoreColumns.Contains(it.DbColumnName.ToLower())).ToList();
             }
@@ -207,7 +431,7 @@ namespace SqlSugar
         }
 
 
-        public  IUpdateable<T> ReSetValue(Action<T> setValueExpression) 
+        public IUpdateable<T> ReSetValue(Action<T> setValueExpression)
         {
             ThrowUpdateByExpression();
             if (this.UpdateObjs.HasValue())
@@ -223,6 +447,67 @@ namespace SqlSugar
             }
             return this;
         }
+        public IUpdateable<T> PublicSetColumns(Expression<Func<T, object>> filedNameExpression, string computationalSymbol) 
+        {
+            if (UpdateParameterIsNull == true)
+            {
+                Check.Exception(UpdateParameterIsNull == true, ErrorMessage.GetThrowMessage("The PublicSetColumns(exp,string) overload can only be used to update entity objects: db.Updateable(object)", "PublicSetColumns(exp,string)重载只能用在实体对象更新：db.Updateable(对象)，请区分表达式更新和实体对象更不同用法 "));
+            }
+            else
+            {
+                var name = ExpressionTool.GetMemberName(filedNameExpression);
+                if (name == null)
+                {
+                    Check.ExceptionEasy(filedNameExpression + " format error ", filedNameExpression + "参数格式错误");
+                }
+                //var value = this.UpdateBuilder.GetExpressionValue(ValueExpExpression, ResolveExpressType.WhereSingle).GetResultString();
+                if (this.UpdateBuilder.ReSetValueBySqlExpList == null)
+                {
+                    this.UpdateBuilder.ReSetValueBySqlExpList = new Dictionary<string, ReSetValueBySqlExpListModel>();
+                }
+                if (!this.UpdateBuilder.ReSetValueBySqlExpList.ContainsKey(name))
+                {
+                    this.UpdateBuilder.ReSetValueBySqlExpList.Add(name, new ReSetValueBySqlExpListModel()
+                    {
+                        Type= ReSetValueBySqlExpListModelType.List,
+                        Sql = computationalSymbol,
+                        DbColumnName = this.SqlBuilder.GetTranslationColumnName(this.EntityInfo.Columns.First(it => it.PropertyName == name).DbColumnName)
+                    });  
+                }
+            }
+            return this;
+        }
+
+        public IUpdateable<T> PublicSetColumns(Expression<Func<T, object>> filedNameExpression, Expression<Func<T, object>> ValueExpExpression) 
+        {
+            if (UpdateParameterIsNull == true)
+            {
+                return SetColumns(filedNameExpression, ValueExpExpression);
+            }
+            else
+            {
+                var name = ExpressionTool.GetMemberName(filedNameExpression);
+                if (name == null)
+                {
+                    Check.ExceptionEasy(filedNameExpression + " format error ", filedNameExpression + "参数格式错误");
+                }
+                var value = this.UpdateBuilder.GetExpressionValue(ValueExpExpression, ResolveExpressType.WhereSingle).GetResultString();
+                if (this.UpdateBuilder.ReSetValueBySqlExpList == null)
+                {
+                    this.UpdateBuilder.ReSetValueBySqlExpList = new Dictionary<string, ReSetValueBySqlExpListModel>();
+                }
+                if (!this.UpdateBuilder.ReSetValueBySqlExpList.ContainsKey(name))
+                {
+                    this.UpdateBuilder.ReSetValueBySqlExpList.Add(name, new ReSetValueBySqlExpListModel()
+                    {
+                        Sql = value,
+                        DbColumnName =this.SqlBuilder.GetTranslationColumnName(this.EntityInfo.Columns.First(it => it.PropertyName == name).DbColumnName)
+                    }); ;
+                }
+            }
+            return this;
+        }
+        #endregion
 
         #region Update by object
         public IUpdateable<T> CallEntityMethod(Expression<Action<T>> method)
@@ -253,7 +538,15 @@ namespace SqlSugar
             foreach (var item in whereColumns)
             {
                 _WhereColumn(item);
-                this.WhereColumnList.Add(item);
+                var columnInfo=this.EntityInfo.Columns.FirstOrDefault(it => it.PropertyName.EqualCase(item));
+                if (columnInfo != null)
+                {
+                    this.WhereColumnList.Add(columnInfo.DbColumnName);
+                }
+                else
+                {
+                    this.WhereColumnList.Add(item);
+                }
             }
             return this;
         }
@@ -269,6 +562,8 @@ namespace SqlSugar
 
         public IUpdateable<T> WhereColumns(string[] columnNames)
         {
+            if (columnNames == null) return this;
+
             ThrowUpdateByExpression();
             if (this.WhereColumnList == null) this.WhereColumnList = new List<string>();
             foreach (var columnName in columnNames)
@@ -278,27 +573,70 @@ namespace SqlSugar
             }
             return this;
         }
-
+        public IUpdateable<T> UpdateColumns(Expression<Func<T, object>> columns, bool appendColumnsByDataFilter) 
+        {
+            ThrowUpdateByExpression();
+            var updateColumns = UpdateBuilder.GetExpressionValue(columns, ResolveExpressType.ArraySingle).GetResultArray().Select(it => this.SqlBuilder.GetNoTranslationColumnName(it)).ToList();
+            return UpdateColumns(updateColumns.ToArray(), appendColumnsByDataFilter);
+        }
         public IUpdateable<T> UpdateColumns(Expression<Func<T, object>> columns)
         {
             ThrowUpdateByExpression();
             var updateColumns = UpdateBuilder.GetExpressionValue(columns, ResolveExpressType.ArraySingle).GetResultArray().Select(it => this.SqlBuilder.GetNoTranslationColumnName(it)).ToList();
-            List<string> primaryKeys = GetPrimaryKeys();
-            foreach (var item in this.UpdateBuilder.DbColumnInfoList)
+            if (this.UpdateBuilder.UpdateColumns == null)
             {
-                var mappingInfo = primaryKeys.SingleOrDefault(i => item.DbColumnName.Equals(i, StringComparison.CurrentCultureIgnoreCase));
-                if (mappingInfo != null && mappingInfo.Any())
+                this.UpdateBuilder.UpdateColumns = new List<string>();
+            }
+            this.UpdateBuilder.UpdateColumns.AddRange(updateColumns);
+            //List<string> primaryKeys = GetPrimaryKeys();
+            //foreach (var item in this.UpdateBuilder.DbColumnInfoList)
+            //{
+            //    var mappingInfo = primaryKeys.SingleOrDefault(i => item.DbColumnName.Equals(i, StringComparison.CurrentCultureIgnoreCase));
+            //    if (mappingInfo != null && mappingInfo.Any())
+            //    {
+            //        item.IsPrimarykey = true;
+            //    }
+            //}
+            //this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => updateColumns.Any(uc => uc.Equals(it.PropertyName, StringComparison.CurrentCultureIgnoreCase) || uc.Equals(it.DbColumnName, StringComparison.CurrentCultureIgnoreCase)) || it.IsPrimarykey || it.IsIdentity).ToList();
+            return this;
+        }
+        public IUpdateable<T> UpdateColumns(string[] columns, bool appendColumnsByDataFilter) 
+        {
+            List<string> updateColumns = new List<string>();
+            if (appendColumnsByDataFilter)
+            {
+                var newData = new T() { };
+                UtilMethods.ClearPublicProperties(newData, this.EntityInfo);
+                var data = ((UpdateableProvider<T>)this.Context.Updateable(newData)).UpdateObjs.First();
+                foreach (var item in this.EntityInfo.Columns.Where(it => !it.IsPrimarykey && !it.IsIgnore && !it.IsOnlyIgnoreUpdate))
                 {
-                    item.IsPrimarykey = true;
+                    var value = item.PropertyInfo.GetValue(data);
+                    if (value != null && !value.Equals(""))
+                    {
+                        if (!value.Equals(UtilMethods.GetDefaultValue(item.UnderType)))
+                        {
+                            updateColumns.Add(item.PropertyName);
+                        }
+                    }
                 }
             }
-            this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => updateColumns.Any(uc => uc.Equals(it.PropertyName, StringComparison.CurrentCultureIgnoreCase) || uc.Equals(it.DbColumnName, StringComparison.CurrentCultureIgnoreCase)) || it.IsPrimarykey || it.IsIdentity).ToList();
-            return this;
+            updateColumns.AddRange(columns);
+            return UpdateColumns(updateColumns.ToArray());
         }
         public IUpdateable<T> UpdateColumns(string[] columns)
         {
+            if (columns == null||columns.Length==0) return this;
             ThrowUpdateByExpression();
-            this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => GetPrimaryKeys().Select(iit => iit.ToLower()).Contains(it.DbColumnName.ToLower()) || columns.Contains(it.PropertyName, StringComparer.OrdinalIgnoreCase)).ToList();
+            if (this.UpdateBuilder.UpdateColumns == null) 
+            {
+                this.UpdateBuilder.UpdateColumns = new List<string>();
+            }
+            this.UpdateBuilder.UpdateColumns.AddRange(columns);
+            //if (columns.HasValue())
+            //{
+              
+            //    //this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => GetPrimaryKeys().Select(iit => iit.ToLower()).Contains(it.DbColumnName.ToLower()) || columns.Contains(it.PropertyName, StringComparer.OrdinalIgnoreCase)).ToList();
+            //}
             return this;
         }
         public IUpdateable<T> UpdateColumnsIF(bool isUpdateColumns, Expression<Func<T, object>> columns)
@@ -318,6 +656,26 @@ namespace SqlSugar
         #endregion
 
         #region Update by expression
+        public IUpdateable<T> EnableQueryFilter() 
+        {
+            try
+            {
+                ThrowUpdateByObject();
+            }
+            catch 
+            {
+                Check.ExceptionEasy("Updateable<T>(obj) no support, use Updateable<T>().SetColumn ", "更新过滤器只能用在表达式方式更新 ,更新分为实体更新和表达式更新 。正确用法 Updateable<T>().SetColum(..).Where(..)");
+            }
+            var queryable = this.Context.Queryable<T>();
+            queryable.QueryBuilder.LambdaExpressions.ParameterIndex = 1000;
+            var sqlable = queryable.ToSql();
+            var whereInfos = Regex.Split(sqlable.Key, " Where ", RegexOptions.IgnoreCase);
+            if (whereInfos.Length > 1)
+            {
+                this.Where(whereInfos.Last(), sqlable.Value);
+            }
+            return this;
+        }
         public IUpdateable<T> SetColumns(string fieldName, object fieldValue) 
         {
             ThrowUpdateByObject();
@@ -333,12 +691,99 @@ namespace SqlSugar
                 UpdateBuilder.Parameters = new List<SugarParameter>();
             }
             UpdateBuilder.Parameters.Add(new SugarParameter(parameterName, fieldValue));
-            UpdateBuilder.SetValues.Add(new KeyValuePair<string, string>(SqlBuilder.GetTranslationColumnName(fieldName), $"{SqlBuilder.GetTranslationColumnName(fieldName)}={parameterName}"));
+            if (columnInfo?.UpdateServerTime == true)
+            {
+                var nowTime= this.Context.Queryable<object>().QueryBuilder.LambdaExpressions.DbMehtods.GetDate();
+                UpdateBuilder.SetValues.Add(new KeyValuePair<string, string>(SqlBuilder.GetTranslationColumnName(fieldName), $"{SqlBuilder.GetTranslationColumnName(fieldName)}={nowTime}"));
+            }
+            else
+            {
+                UpdateBuilder.SetValues.Add(new KeyValuePair<string, string>(SqlBuilder.GetTranslationColumnName(fieldName), $"{SqlBuilder.GetTranslationColumnName(fieldName)}={parameterName}"));
+            }
             this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => (UpdateParameterIsNull == false && IsPrimaryKey(it)) || UpdateBuilder.SetValues.Any(v => SqlBuilder.GetNoTranslationColumnName(v.Key).Equals(it.DbColumnName, StringComparison.CurrentCultureIgnoreCase) || SqlBuilder.GetNoTranslationColumnName(v.Key).Equals(it.PropertyName, StringComparison.CurrentCultureIgnoreCase)) || it.IsPrimarykey == true).ToList();
+            if (!this.UpdateBuilder.DbColumnInfoList.Any(it => it.DbColumnName.EqualCase(fieldName))) 
+            {
+                this.UpdateBuilder.DbColumnInfoList.Add(new DbColumnInfo()
+                {
+                     DbColumnName=fieldName,
+                      Value=fieldValue,
+                      PropertyName=fieldName,
+                      PropertyType=fieldValue?.GetType()
+                });
+            }
             AppendSets();
             return this;
         }
+        public IUpdateable<T> SetColumnsIF(bool isUpdateColumns, Expression<Func<T, object>> filedNameExpression, object fieldValue) 
+        {
+            if (isUpdateColumns)
+            {
+                return SetColumns(filedNameExpression, fieldValue);
+            }
+            else
+            {
+                return this;
+            }
+        }
+        public IUpdateable<T> SetColumns(Expression<Func<T, object>> filedNameExpression, Expression<Func<T, object>> valueExpression) 
+        {
+            if (valueExpression == null) 
+            {
+                return SetColumns(filedNameExpression,(object)null);
+            }
+            var name = UpdateBuilder.GetExpressionValue(filedNameExpression, ResolveExpressType.FieldSingle).GetString();
+            name = UpdateBuilder.Builder.GetTranslationColumnName(name);
+            var exp = ExpressionTool.RemoveConvert((valueExpression as LambdaExpression).Body);
+            var value = UpdateBuilder.GetExpressionValue(exp, ResolveExpressType.WhereSingle).GetString();
+            value = $" {name}={value} ";
+            this.UpdateBuilder.SetValues.Add(new KeyValuePair<string, string>(name,value)); 
+            this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it => (UpdateParameterIsNull == false && IsPrimaryKey(it)) || UpdateBuilder.SetValues.Any(v => SqlBuilder.GetNoTranslationColumnName(v.Key).Equals(it.DbColumnName, StringComparison.CurrentCultureIgnoreCase) || SqlBuilder.GetNoTranslationColumnName(v.Key).Equals(it.PropertyName, StringComparison.CurrentCultureIgnoreCase)) || it.IsPrimarykey == true).ToList();
+            AppendSets();
+            if (typeof(T) == UtilConstants.ObjType)
+            {
+                this.UpdateBuilder.DbColumnInfoList.Add(new DbColumnInfo()
+                {
+                    DbColumnName = UpdateBuilder.Builder.GetNoTranslationColumnName(name),
+                    Value = value,
+                    PropertyName = name,
+                    SqlParameterDbType = typeof(SqlSugar.DbConvert.NoParameterCommonPropertyConvert)
+                });
+            }
+            return this; 
+        }
+        public IUpdateable<T> SetColumns(Expression<Func<T, object>> filedNameExpression, object fieldValue) 
+        {
+            var name= UpdateBuilder.GetExpressionValue(filedNameExpression,ResolveExpressType.FieldSingle).GetString();
+            name = UpdateBuilder.Builder.GetNoTranslationColumnName(name);
+            return SetColumns(name, fieldValue);
+        }
         public IUpdateable<T> SetColumns(Expression<Func<T, T>> columns)
+        {
+            ThrowUpdateByObject();
+            var expResult = UpdateBuilder.GetExpressionValue(columns, ResolveExpressType.Update);
+            var resultArray = expResult.GetResultArray();
+            Check.ArgumentNullException(resultArray, "UpdateColumns Parameter error, UpdateColumns(it=>new T{ it.id=1}) is valid, UpdateColumns(it=>T) is error");
+            var keys= ExpressionTool.GetNewExpressionItemList(columns).ToArray();
+            if (resultArray.HasValue())
+            {
+                int i = 0;
+                foreach (var item in resultArray)
+                {
+                    string key = key = keys[i].Key;
+                    i++;
+                    var value = item;
+                    value = GetSetSql(value, columns);
+                    UpdateBuilder.SetValues.Add(new KeyValuePair<string, string>(SqlBuilder.GetTranslationColumnName(key), value));
+                }
+            }
+            this.UpdateBuilder.DbColumnInfoList = UpdateBuilder.DbColumnInfoList.Where(it =>it.UpdateServerTime==true||it.UpdateSql.HasValue()|| (UpdateParameterIsNull == false && IsPrimaryKey(it)) || UpdateBuilder.SetValues.Any(v => SqlBuilder.GetNoTranslationColumnName(v.Key).Equals(it.DbColumnName, StringComparison.CurrentCultureIgnoreCase) || SqlBuilder.GetNoTranslationColumnName(v.Key).Equals(it.PropertyName, StringComparison.CurrentCultureIgnoreCase)) || it.IsPrimarykey == true).ToList();
+            CheckTranscodeing(false);
+            AppendSets();
+            return this;
+        }
+
+
+        public IUpdateable<T> SetColumns(Expression<Func<T, T>> columns, bool appendColumnsByDataFilter) 
         {
             ThrowUpdateByObject();
             var expResult = UpdateBuilder.GetExpressionValue(columns, ResolveExpressType.Update);
@@ -361,7 +806,42 @@ namespace SqlSugar
                     UpdateBuilder.SetValues.Add(new KeyValuePair<string, string>(SqlBuilder.GetTranslationColumnName(key), value));
                 }
             }
-            this.UpdateBuilder.DbColumnInfoList = UpdateBuilder.DbColumnInfoList.Where(it => (UpdateParameterIsNull == false && IsPrimaryKey(it)) || UpdateBuilder.SetValues.Any(v => SqlBuilder.GetNoTranslationColumnName(v.Key).Equals(it.DbColumnName, StringComparison.CurrentCultureIgnoreCase) || SqlBuilder.GetNoTranslationColumnName(v.Key).Equals(it.PropertyName, StringComparison.CurrentCultureIgnoreCase)) || it.IsPrimarykey == true).ToList();
+            if (appendColumnsByDataFilter)
+            {
+                var newData = new T() { };
+                UtilMethods.ClearPublicProperties(newData, this.EntityInfo);
+                var data = ((UpdateableProvider<T>)this.Context.Updateable(newData)).UpdateObjs.First();
+                foreach (var item in this.EntityInfo.Columns.Where(it => !it.IsPrimarykey && !it.IsIgnore && !it.IsOnlyIgnoreUpdate))
+                {
+                    var value = item.PropertyInfo.GetValue(data);
+                    if (value != null && !value.Equals(""))
+                    {
+                        if (!value.Equals(UtilMethods.GetDefaultValue(item.UnderType))) 
+                        {
+                            var pName = this.SqlBuilder.SqlParameterKeyWord + item.PropertyName + 1000;
+                            var p = new SugarParameter(pName, value);
+                            this.UpdateBuilder.Parameters.Add(p);
+                            UpdateBuilder.SetValues.Add(new KeyValuePair<string, string>(SqlBuilder.GetTranslationColumnName(item.DbColumnName), SqlBuilder.GetTranslationColumnName(item.DbColumnName)+"="+pName));
+                        }
+                    }
+                }
+            }
+            if (this.EntityInfo.Columns.Any(it => it.UpdateServerTime || it.UpdateSql.HasValue())) 
+            {
+                var appendColumns = this.EntityInfo.Columns.Where(it => it.UpdateServerTime || it.UpdateSql.HasValue());
+                foreach (var item in appendColumns)
+                {
+                    if (item.UpdateServerTime)
+                    {
+                        UpdateBuilder.SetValues.Add(new KeyValuePair<string, string>(SqlBuilder.GetTranslationColumnName(item.DbColumnName), SqlBuilder.GetTranslationColumnName(item.DbColumnName) + "=" + UpdateBuilder.LambdaExpressions.DbMehtods.GetDate()));
+                    }
+                    else if (item.UpdateSql.HasValue())
+                    {
+                        UpdateBuilder.SetValues.Add(new KeyValuePair<string, string>(SqlBuilder.GetTranslationColumnName(item.DbColumnName), SqlBuilder.GetTranslationColumnName(item.DbColumnName) + "=" + item.UpdateSql));
+                    }
+                }
+            }
+            this.UpdateBuilder.DbColumnInfoList = UpdateBuilder.DbColumnInfoList.Where(it =>it.UpdateServerTime||it.UpdateSql.HasValue()|| (UpdateParameterIsNull == false && IsPrimaryKey(it)) || UpdateBuilder.SetValues.Any(v => SqlBuilder.GetNoTranslationColumnName(v.Key).Equals(it.DbColumnName, StringComparison.CurrentCultureIgnoreCase) || SqlBuilder.GetNoTranslationColumnName(v.Key).Equals(it.PropertyName, StringComparison.CurrentCultureIgnoreCase)) || it.IsPrimarykey == true).ToList();
             CheckTranscodeing(false);
             AppendSets();
             return this;
@@ -374,10 +854,23 @@ namespace SqlSugar
             Check.Exception(!binaryExp.NodeType.IsIn(ExpressionType.Equal), "No support {0}", columns.ToString());
             Check.Exception(!(binaryExp.Left is MemberExpression) && !(binaryExp.Left is UnaryExpression), "No support {0}", columns.ToString());
             Check.Exception(ExpressionTool.IsConstExpression(binaryExp.Left as MemberExpression), "No support {0}", columns.ToString());
-            var expResult = UpdateBuilder.GetExpressionValue(columns, ResolveExpressType.WhereSingle).GetResultString().Replace(")", " )").Replace("(", "( ").Trim().TrimStart('(').TrimEnd(')');
+            if (UpdateBuilder.LambdaExpressions.ParameterIndex <= 1&&
+                                        this.EntityInfo.Columns
+                                       .Select(it=>it.PropertyName.TrimEnd('2'))
+                                       .GroupBy(it=>it)
+                                       .Any(it=>it.Count()>1) 
+                                   ) 
+            {
+                UpdateBuilder.LambdaExpressions.ParameterIndex = 100;
+            }
+            var expResult = UpdateBuilder.GetExpressionValue(columns, ResolveExpressType.WhereSingle).GetResultString().Replace(")", " )").Replace("(", "( ").Trim().TrimStart('(').TrimEnd(')').Replace("= =","=");
             if (expResult.EndsWith(" IS NULL  ")) 
             {
                 expResult = Regex.Split(expResult, " IS NULL  ")[0]+" = NULL ";
+            }
+            else if (!expResult.Contains("=")&&expResult.Contains("IS  NULL  "))
+            {
+                expResult = Regex.Split(expResult, "IS  NULL  ")[0] + " = NULL ";
             }
             string key = SqlBuilder.GetNoTranslationColumnName(expResult);
 
@@ -388,7 +881,7 @@ namespace SqlSugar
 
             if (columns.ToString().Contains("Subqueryable()."))
             {
-                expResult= expResult.Replace(this.SqlBuilder.SqlTranslationLeft+ (binaryExp.Left as MemberExpression).Expression+this.SqlBuilder.SqlTranslationRight+".",this.UpdateBuilder.GetTableNameString.TrimEnd()+".");
+                expResult= expResult.Replace(this.SqlBuilder.GetTranslationColumnName((ExpressionTool.RemoveConvert(binaryExp.Left) as MemberExpression).Expression+"") +".",this.UpdateBuilder.GetTableNameString.TrimEnd()+".");
             }
 
             UpdateBuilder.SetValues.Add(new KeyValuePair<string, string>(SqlBuilder.GetTranslationColumnName(key), expResult));
@@ -410,7 +903,34 @@ namespace SqlSugar
                 SetColumns(columns);
             return this;
         }
-
+        public IUpdateable<T> In<PkType>(Expression<Func<T, object>> inField, ISugarQueryable<PkType> childQueryExpression)
+        {
+            var lamResult = UpdateBuilder.GetExpressionValue(inField, ResolveExpressType.FieldSingle);
+            this.UpdateBuilder.LambdaExpressions.ParameterIndex = childQueryExpression.QueryBuilder.LambdaExpressions.ParameterIndex+1;
+            var fieldName = lamResult.GetResultString();
+            if (!this.UpdateBuilder.SetValues.Any())
+            {
+                var sql = childQueryExpression.ToSql();
+                Where($" {fieldName} IN ( SELECT {fieldName} FROM ( {sql.Key} ) SUBDEL) ", sql.Value);
+            }
+            else
+            {
+                Where($" {fieldName} IN ( SELECT {fieldName} FROM ( {childQueryExpression.ToSqlString()} ) SUBDEL) ");
+            }
+            return this;
+        }
+        public IUpdateable<T> WhereIF(bool isWhere, Expression<Func<T, bool>> expression) 
+        {
+            if (UpdateBuilder.WhereValues.Any() != true)
+            {
+                Check.ExceptionEasy(!StaticConfig.EnableAllWhereIF, "Need to program startup configuration StaticConfig. EnableAllWhereIF = true; Tip: This operation is very risky if there are no conditions it is easy to update the entire table", " 需要程序启动时配置StaticConfig.EnableAllWhereIF=true; 提示：该操作存在很大的风险如果没有条件很容易将整个表全部更新");
+            }
+            if (isWhere) 
+            {
+                return Where(expression);
+            }
+            return this;
+        }
         public IUpdateable<T> Where(Expression<Func<T, bool>> expression)
         {
             Check.Exception(UpdateObjectNotWhere()&&UpdateObjs.Length > 1, ErrorMessage.GetThrowMessage("update List no support where","集合更新不支持Where请使用WhereColumns"));
@@ -418,11 +938,27 @@ namespace SqlSugar
             var whereString = expResult.GetResultString();
             if (expression.ToString().Contains("Subqueryable()"))
             {
-                whereString = whereString.Replace(this.SqlBuilder.GetTranslationColumnName(expression.Parameters.First().Name) + ".", this.SqlBuilder.GetTranslationTableName(this.EntityInfo.DbTableName) + ".");
+                var entityTableName = this.EntityInfo.DbTableName;
+                if (UpdateBuilder.TableName.HasValue()) 
+                {
+                    entityTableName = UpdateBuilder.TableName;
+                }
+                if (ExpressionTool.GetParameters(expression).First().Type == typeof(T))
+                {
+                    var tableName = this.SqlBuilder.GetTranslationColumnName(entityTableName);
+                    whereString = whereString.Replace(tableName, $"( SELECT * FROM {tableName})  ");
+                }
+                whereString = whereString.Replace(this.SqlBuilder.GetTranslationColumnName(expression.Parameters.First().Name) + ".", this.SqlBuilder.GetTranslationTableName(entityTableName) + ".");
             }
             else if (expResult.IsNavicate)
             {
-                whereString = whereString.Replace(expression.Parameters.First().Name + ".", this.SqlBuilder.GetTranslationTableName(this.EntityInfo.DbTableName) + ".");
+                var entityTableName2 = this.EntityInfo.DbTableName;
+                if (this.UpdateBuilder.TableName.HasValue())
+                {
+                    entityTableName2 = this.UpdateBuilder.TableName;
+                }
+                whereString = whereString.Replace(expression.Parameters.First().Name + ".", this.SqlBuilder.GetTranslationTableName(entityTableName2) + ".");
+                whereString = whereString.Replace(this.SqlBuilder.GetTranslationColumnName(expression.Parameters.First().Name) + ".", this.SqlBuilder.GetTranslationTableName(entityTableName2) + ".");
             }
             UpdateBuilder.WhereValues.Add(whereString);
             return this;
@@ -457,475 +993,24 @@ namespace SqlSugar
             result.Where(sql.Key, sql.Value);
             return result;
         }
-        #endregion
-
-        #region Helper
-
-        private bool UpdateObjectNotWhere()
+        public ParameterUpdateable<T> UseParameter() 
         {
-            return this.Context.CurrentConnectionConfig.DbType != DbType.MySql 
-                &&  this.Context.CurrentConnectionConfig.DbType!=DbType.MySqlConnector
-                && this.Context.CurrentConnectionConfig.DbType != DbType.SqlServer;
+            ThrowUpdateByExpressionByMesage(ErrorMessage.GetThrowMessage("UseParameter can only be updated through entity objects", "UseParameter只能通过实体对象更新，不能是表达式方式更新"));
+            ParameterUpdateable<T> parameter = new ParameterUpdateable<T>();
+            parameter.Context = this.Context;
+            parameter.Updateable =(UpdateableProvider<T>)this;
+            return parameter;
         }
-
-        private void AppendSets()
+        public IUpdateable<T> In(object[] ids) 
         {
-            if (SetColumnsIndex > 0)
-            {
-                var keys = UpdateBuilder.SetValues.Select(it => SqlBuilder.GetNoTranslationColumnName(it.Key.ToLower())).ToList();
-                var addKeys = keys.Where(k => !this.UpdateBuilder.DbColumnInfoList.Any(it => it.PropertyName.ToLower() == k || it.DbColumnName.ToLower() == k)).ToList();
-                var addItems = this.EntityInfo.Columns.Where(it => !GetPrimaryKeys().Any(p => p.ToLower() == it.PropertyName?.ToLower() || p.ToLower() == it.DbColumnName?.ToLower()) && addKeys.Any(k => it.PropertyName?.ToLower() == k || it.DbColumnName?.ToLower() == k)).ToList();
-                this.UpdateBuilder.DbColumnInfoList.AddRange(addItems.Select(it => new DbColumnInfo() { PropertyName = it.PropertyName, DbColumnName = it.DbColumnName }));
-            }
-            SetColumnsIndex++;
-        }
-        private string _ExecuteCommand()
-        {
-            PreToSql();
-            AutoRemoveDataCache();
-            Check.Exception(UpdateBuilder.WhereValues.IsNullOrEmpty() && GetPrimaryKeys().IsNullOrEmpty(), "You cannot have no primary key and no conditions");
-            string sql = UpdateBuilder.ToSqlString();
-            ValidateVersion();
-            RestoreMapping();
-            Before(sql);
-            return sql;
-        }
-
-        private void _WhereColumn(string columnName)
-        {
-            var columnInfos = columns.Where(it => it.DbColumnName.Equals(columnName, StringComparison.OrdinalIgnoreCase) || it.PropertyName.Equals(columnName, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (!this.UpdateBuilder.DbColumnInfoList.Any(y => y.DbColumnName == columnInfos.First().DbColumnName))
-            {
-                this.UpdateBuilder.DbColumnInfoList.AddRange(columnInfos);
-            }
-        }
-
-        private void AutoRemoveDataCache()
-        {
-            var moreSetts = this.Context.CurrentConnectionConfig.MoreSettings;
-            var extService = this.Context.CurrentConnectionConfig.ConfigureExternalServices;
-            if (moreSetts != null && moreSetts.IsAutoRemoveDataCache && extService != null && extService.DataInfoCacheService != null)
-            {
-                this.RemoveDataCache();
-            }
-        }
-        internal void Init()
-        {
-            this.UpdateBuilder.TableName = EntityInfo.EntityName;
-            if (IsMappingTable)
-            {
-                var mappingInfo = this.Context.MappingTables.SingleOrDefault(it => it.EntityName == EntityInfo.EntityName);
-                if (mappingInfo != null)
-                {
-                    this.UpdateBuilder.TableName = mappingInfo.DbTableName;
-                }
-            }
-            //Check.Exception(UpdateObjs == null || UpdateObjs.Count() == 0, "UpdateObjs is null");
-            int i = 0;
-            foreach (var item in UpdateObjs)
-            {
-                List<DbColumnInfo> updateItem = new List<DbColumnInfo>();
-                var isDic = item is Dictionary<string, object>;
-                if (isDic)
-                {
-                    SetUpdateItemByDic(i, item, updateItem);
-                }
-                else
-                {
-                    DataAop(item);
-                    SetUpdateItemByEntity(i, item, updateItem);
-                }
-                ++i;
-            }
-            this.columns = this.UpdateBuilder.DbColumnInfoList;
-
-            var ignoreColumns = EntityInfo.Columns.Where(it => it.IsOnlyIgnoreUpdate).ToList();
-            if (ignoreColumns != null && ignoreColumns.Any())
-            {
-                this.IgnoreColumns(ignoreColumns.Select(it => it.PropertyName).ToArray());
-            }
-        }
-
-        private void DataAop(T item)
-        {
-            var dataEvent = this.Context.CurrentConnectionConfig.AopEvents?.DataExecuting;
-            if (dataEvent != null && item != null)
-            {
-                foreach (var columnInfo in this.EntityInfo.Columns)
-                {
-                    dataEvent(columnInfo.PropertyInfo.GetValue(item, null), new DataFilterModel() { OperationType = DataFilterType.UpdateByObject, EntityValue = item, EntityColumnInfo = columnInfo });
-                }
-            }
-        }
-
-        private void CheckTranscodeing(bool checkIsJson = true)
-        {
-            if (this.EntityInfo.Columns.Any(it => it.IsTranscoding))
-            {
-                Check.Exception(true, ErrorMessage.GetThrowMessage("UpdateColumns no support IsTranscoding", "SetColumns方式更新不支持IsTranscoding，你可以使用db.Updateable(实体)的方式更新"));
-            }
-            if (checkIsJson && this.EntityInfo.Columns.Any(it => it.IsJson))
-            {
-                Check.Exception(true, ErrorMessage.GetThrowMessage("UpdateColumns no support IsJson", "SetColumns方式更新不支持IsJson，你可以使用db.Updateable(实体)的方式更新"));
-            }
-            if (this.EntityInfo.Columns.Any(it => it.IsArray))
-            {
-                Check.Exception(true, ErrorMessage.GetThrowMessage("UpdateColumns no support IsArray", "SetColumns方式更新不支持IsArray，你可以使用db.Updateable(实体)的方式更新"));
-            }
-        }
-        private void SetUpdateItemByDic(int i, T item, List<DbColumnInfo> updateItem)
-        {
-            foreach (var column in item as Dictionary<string, object>)
-            {
-                var columnInfo = new DbColumnInfo()
-                {
-                    Value = column.Value,
-                    DbColumnName = column.Key,
-                    PropertyName = column.Key,
-                    PropertyType = column.Value == null ? DBNull.Value.GetType() : UtilMethods.GetUnderType(column.Value.GetType()),
-                    TableId = i
-                };
-                if (columnInfo.PropertyType.IsEnum())
-                {
-                    if (this.Context.CurrentConnectionConfig.MoreSettings?.TableEnumIsString == true)
-                    {
-                        columnInfo.PropertyType = UtilConstants.StringType;
-                        columnInfo.Value = columnInfo.Value.ToString();
-                    }
-                    else
-                    {
-                        columnInfo.Value = Convert.ToInt64(columnInfo.Value);
-                    }
-                }
-                updateItem.Add(columnInfo);
-            }
-            this.UpdateBuilder.DbColumnInfoList.AddRange(updateItem);
-        }
-        private void SetUpdateItemByEntity(int i, T item, List<DbColumnInfo> updateItem)
-        {
-            foreach (var column in EntityInfo.Columns)
-            {
-                if (column.IsIgnore) continue;
-                var columnInfo = new DbColumnInfo()
-                {
-                    Value = column.PropertyInfo.GetValue(item, null),
-                    DbColumnName = GetDbColumnName(column.PropertyName),
-                    PropertyName = column.PropertyName,
-                    PropertyType = UtilMethods.GetUnderType(column.PropertyInfo),
-                    TableId = i
-                };
-                if (columnInfo.PropertyType.IsEnum()&& columnInfo.Value!=null)
-                {
-                    if (this.Context.CurrentConnectionConfig.MoreSettings?.TableEnumIsString == true)
-                    {
-                        columnInfo.PropertyType = UtilConstants.StringType;
-                        columnInfo.Value = columnInfo.Value.ToString();
-                    }
-                    else
-                    {
-                        columnInfo.Value = Convert.ToInt64(columnInfo.Value);
-                    }
-                }
-                if (column.IsJson)
-                {
-                    columnInfo.IsJson = true;
-                    if (columnInfo.Value != null)
-                        columnInfo.Value = this.Context.Utilities.SerializeObject(columnInfo.Value);
-                }
-                if (column.IsArray)
-                {
-                    columnInfo.IsArray = true;
-                }
-                var tranColumn = EntityInfo.Columns.FirstOrDefault(it => it.IsTranscoding && it.DbColumnName.Equals(column.DbColumnName, StringComparison.CurrentCultureIgnoreCase));
-                if (tranColumn != null && columnInfo.Value.HasValue())
-                {
-                    columnInfo.Value = UtilMethods.EncodeBase64(columnInfo.Value.ToString());
-                }
-                updateItem.Add(columnInfo);
-            }
-            this.UpdateBuilder.DbColumnInfoList.AddRange(updateItem);
-        }
-
-        private void PreToSql()
-        {
-
-            UpdateBuilder.PrimaryKeys = GetPrimaryKeys();
-            if (this.IsWhereColumns)
-            {
-                foreach (var pkName in UpdateBuilder.PrimaryKeys)
-                {
-                    if (WhereColumnList != null&& WhereColumnList.Count()>0)
-                    {
-                        continue;
-                    }
-                    var isContains = this.UpdateBuilder.DbColumnInfoList.Select(it => it.DbColumnName.ToLower()).Contains(pkName.ToLower());
-                    Check.Exception(isContains == false, "Use UpdateColumns().WhereColumn() ,UpdateColumns need {0}", pkName);
-                }
-            }
-            #region IgnoreColumns
-            if (this.Context.IgnoreColumns != null && this.Context.IgnoreColumns.Any())
-            {
-                var currentIgnoreColumns = this.Context.IgnoreColumns.Where(it => it.EntityName == this.EntityInfo.EntityName).ToList();
-                this.UpdateBuilder.DbColumnInfoList = this.UpdateBuilder.DbColumnInfoList.Where(it =>
-                {
-                    return !currentIgnoreColumns.Any(i => it.PropertyName.Equals(i.PropertyName, StringComparison.CurrentCulture));
-                }).ToList();
-            }
-            #endregion
-            if (this.IsSingle)
-            {
-                foreach (var item in this.UpdateBuilder.DbColumnInfoList)
-                {
-                    if (this.UpdateBuilder.Parameters == null) this.UpdateBuilder.Parameters = new List<SugarParameter>();
-                    if (this.UpdateBuilder.SetValues.Any(it => this.SqlBuilder.GetNoTranslationColumnName(it.Key) == item.PropertyName))
-                    {
-                        continue;
-                    }
-                    var parameter = new SugarParameter(this.SqlBuilder.SqlParameterKeyWord + item.DbColumnName, item.Value, item.PropertyType);
-                    if (item.IsJson)
-                    {
-                        parameter.IsJson = true;
-                    }
-                    if (item.IsArray)
-                    {
-                        parameter.IsArray = true;
-                    }
-                    this.UpdateBuilder.Parameters.Add(parameter);
-                }
-            }
-
-            #region Identities
-            List<string> identities = GetIdentityKeys();
-            if (identities != null && identities.Any())
-            {
-                this.UpdateBuilder.DbColumnInfoList.ForEach(it =>
-                {
-                    var mappingInfo = identities.SingleOrDefault(i => it.DbColumnName.Equals(i, StringComparison.CurrentCultureIgnoreCase));
-                    if (mappingInfo != null && mappingInfo.Any())
-                    {
-                        it.IsIdentity = true;
-                    }
-                });
-            }
-            #endregion
-            List<string> primaryKey = GetPrimaryKeys();
-            if (primaryKey != null && primaryKey.Count > 0)
-            {
-                this.UpdateBuilder.DbColumnInfoList.ForEach(it =>
-                {
-                    var mappingInfo = primaryKey.SingleOrDefault(i => it.DbColumnName.Equals(i, StringComparison.CurrentCultureIgnoreCase));
-                    if (mappingInfo != null && mappingInfo.Any())
-                    {
-                        it.IsPrimarykey = true;
-                    }
-                });
-            }
-            if (this.UpdateBuilder.Parameters.HasValue() && this.UpdateBuilder.SetValues.IsValuable())
-            {
-                this.UpdateBuilder.Parameters.RemoveAll(it => this.UpdateBuilder.SetValues.Any(v => (SqlBuilder.SqlParameterKeyWord + SqlBuilder.GetNoTranslationColumnName(v.Key)) == it.ParameterName));
-            }
-        }
-        private string GetDbColumnName(string propertyName)
-        {
-            if (!IsMappingColumns)
-            {
-                return propertyName;
-            }
-            if (this.Context.MappingColumns.Any(it => it.EntityName.Equals(EntityInfo.EntityName, StringComparison.CurrentCultureIgnoreCase)))
-            {
-                this.MappingColumnList = this.Context.MappingColumns.Where(it => it.EntityName.Equals(EntityInfo.EntityName, StringComparison.CurrentCultureIgnoreCase)).ToList();
-            }
-            if (MappingColumnList == null || !MappingColumnList.Any())
-            {
-                return propertyName;
-            }
-            else
-            {
-                var mappInfo = this.MappingColumnList.FirstOrDefault(it => it.PropertyName.Equals(propertyName, StringComparison.CurrentCultureIgnoreCase));
-                return mappInfo == null ? propertyName : mappInfo.DbColumnName;
-            }
-        }
-        private List<string> GetPrimaryKeys()
-        {
-            if (this.WhereColumnList.HasValue())
-            {
-                return this.WhereColumnList;
-            }
-            if (this.Context.IsSystemTablesConfig)
-            {
-                return this.Context.DbMaintenance.GetPrimaries(this.Context.EntityMaintenance.GetTableName(this.EntityInfo.EntityName));
-            }
-            else
-            {
-                return this.EntityInfo.Columns.Where(it => it.IsPrimarykey).Select(it => it.DbColumnName).ToList();
-            }
-        }
-        protected virtual List<string> GetIdentityKeys()
-        {
-            if (this.Context.IsSystemTablesConfig)
-            {
-                return this.Context.DbMaintenance.GetIsIdentities(this.Context.EntityMaintenance.GetTableName(this.EntityInfo.EntityName));
-            }
-            else
-            {
-                return this.EntityInfo.Columns.Where(it => it.IsIdentity).Select(it => it.DbColumnName).ToList();
-            }
-        }
-        private void RestoreMapping()
-        {
-            if (IsAs)
-            {
-                this.Context.MappingTables = OldMappingTableList;
-            }
-        }
-
-
-        private void ValidateVersion()
-        {
-            var versionColumn = this.EntityInfo.Columns.FirstOrDefault(it => it.IsEnableUpdateVersionValidation);
-            var pks = this.UpdateBuilder.DbColumnInfoList.Where(it => it.IsPrimarykey).ToList();
-            if (versionColumn != null && this.IsVersionValidation)
-            {
-                Check.Exception(pks.IsNullOrEmpty(), "UpdateVersionValidation the primary key is required.");
-                List<IConditionalModel> conModels = new List<IConditionalModel>();
-                foreach (var item in pks)
-                {
-                    conModels.Add(new ConditionalModel() { FieldName = item.DbColumnName, ConditionalType = ConditionalType.Equal, FieldValue = item.Value.ObjToString() });
-                }
-                var dbInfo = this.Context.Queryable<T>().Where(conModels).First();
-                if (dbInfo != null)
-                {
-                    var currentVersion = this.EntityInfo.Type.GetProperty(versionColumn.PropertyName).GetValue(UpdateObjs.Last(), null);
-                    var dbVersion = this.EntityInfo.Type.GetProperty(versionColumn.PropertyName).GetValue(dbInfo, null);
-                    Check.Exception(currentVersion == null, "UpdateVersionValidation entity property {0} is not null", versionColumn.PropertyName);
-                    Check.Exception(dbVersion == null, "UpdateVersionValidation database column {0} is not null", versionColumn.DbColumnName);
-                    if (versionColumn.PropertyInfo.PropertyType.IsIn(UtilConstants.IntType, UtilConstants.LongType))
-                    {
-                        if (Convert.ToInt64(dbVersion) != Convert.ToInt64(currentVersion))
-                        {
-                            throw new VersionExceptions(string.Format("UpdateVersionValidation {0} Not the latest version ", versionColumn.PropertyName));
-                        }
-                    }
-                    else if (versionColumn.PropertyInfo.PropertyType.IsIn(UtilConstants.DateType))
-                    {
-                        if (dbVersion.ObjToDate() != currentVersion.ObjToDate())
-                        {
-                            throw new VersionExceptions(string.Format("UpdateVersionValidation {0} Not the latest version ", versionColumn.PropertyName));
-                        }
-                    }
-                    else if (versionColumn.PropertyInfo.PropertyType.IsIn(UtilConstants.ByteArrayType))
-                    {
-                        if (UtilMethods.GetLong((byte[])dbVersion) != UtilMethods.GetLong((byte[])currentVersion))
-                        {
-                            throw new VersionExceptions(string.Format("UpdateVersionValidation {0} Not the latest version ", versionColumn.PropertyName));
-                        }
-                    }
-                    else
-                    {
-                        Check.ThrowNotSupportedException(string.Format("UpdateVersionValidation Not Supported Type [ {0} ] , {1}", versionColumn.PropertyInfo.PropertyType, versionColumn.PropertyName));
-                    }
-                }
-            }
-        }
-        private void After(string sql)
-        {
-            if (this.IsEnableDiffLogEvent)
-            {
-                var isDisableMasterSlaveSeparation = this.Ado.IsDisableMasterSlaveSeparation;
-                this.Ado.IsDisableMasterSlaveSeparation = true;
-                var parameters = UpdateBuilder.Parameters;
-                if (parameters == null)
-                    parameters = new List<SugarParameter>();
-                diffModel.AfterData = GetDiffTable(sql, parameters);
-                diffModel.Time = this.Context.Ado.SqlExecutionTime;
-                if (this.Context.CurrentConnectionConfig.AopEvents.OnDiffLogEvent != null)
-                    this.Context.CurrentConnectionConfig.AopEvents.OnDiffLogEvent(diffModel);
-                this.Ado.IsDisableMasterSlaveSeparation = isDisableMasterSlaveSeparation;
-            }
-            if (this.RemoveCacheFunc != null)
-            {
-                this.RemoveCacheFunc();
-            }
-        }
-
-        private void Before(string sql)
-        {
-            if (this.IsEnableDiffLogEvent)
-            {
-                var isDisableMasterSlaveSeparation = this.Ado.IsDisableMasterSlaveSeparation;
-                this.Ado.IsDisableMasterSlaveSeparation = true;
-                var parameters = UpdateBuilder.Parameters;
-                if (parameters == null)
-                    parameters = new List<SugarParameter>();
-                diffModel.BeforeData = GetDiffTable(sql, parameters);
-                diffModel.Sql = sql;
-                diffModel.Parameters = parameters.ToArray();
-                this.Ado.IsDisableMasterSlaveSeparation = isDisableMasterSlaveSeparation;
-            }
-        }
-        private bool IsPrimaryKey(DbColumnInfo it)
-        {
-            var result = GetPrimaryKeys().Any(p => p.Equals(it.DbColumnName, StringComparison.CurrentCultureIgnoreCase) || p.Equals(it.PropertyName, StringComparison.CurrentCultureIgnoreCase));
-            return result;
-        }
-
-        private List<DiffLogTableInfo> GetDiffTable(string sql, List<SugarParameter> parameters)
-        {
-            List<DiffLogTableInfo> result = new List<DiffLogTableInfo>();
-            DataTable dt = null;
-            if (this.UpdateParameterIsNull)
-            {
-                var whereSql = Regex.Replace(sql, ".* WHERE ", "", RegexOptions.Singleline);
-                if (sql.Contains("WHERE (EXISTS")) 
-                {
-                    whereSql=Regex.Match(sql, @"\(EXISTS.+").Value;
-                }
-                dt = this.Context.Queryable<T>().Filter(null, true).Where(whereSql).AddParameters(parameters).ToDataTable();
-            }
-            else 
-            {
-                if (this.UpdateObjs.ToList().Count == 0)
-                {
-                    dt = new DataTable();
-                }
-                else
-                {
-                    dt = this.Context.Queryable<T>().Filter(null, true).WhereClassByPrimaryKey(this.UpdateObjs.ToList()).ToDataTable();
-                }
-            }
-            if (dt.Rows != null && dt.Rows.Count > 0)
-            {
-                foreach (DataRow row in dt.Rows)
-                {
-                    DiffLogTableInfo item = new DiffLogTableInfo();
-                    item.TableDescription = this.EntityInfo.TableDescription;
-                    item.TableName = this.EntityInfo.DbTableName;
-                    item.Columns = new List<DiffLogColumnInfo>();
-                    foreach (DataColumn col in dt.Columns)
-                    {
-                        var sugarColumn = this.EntityInfo.Columns.Where(it => it.DbColumnName != null).First(it =>
-                            it.DbColumnName.Equals(col.ColumnName, StringComparison.CurrentCultureIgnoreCase));
-                        DiffLogColumnInfo addItem = new DiffLogColumnInfo();
-                        addItem.Value = row[col.ColumnName];
-                        addItem.ColumnName = col.ColumnName;
-                        addItem.IsPrimaryKey = sugarColumn.IsPrimarykey;
-                        addItem.ColumnDescription = sugarColumn.ColumnDescription;
-                        item.Columns.Add(addItem);
-                    }
-                    result.Add(item);
-                }
-            }
-            return result;
-        }
-
-        private void ThrowUpdateByExpression()
-        {
-            Check.Exception(UpdateParameterIsNull == true, ErrorMessage.GetThrowMessage(" no support UpdateColumns and WhereColumns", "根据表达式更新 db.Updateable<T>() 禁止使用 UpdateColumns和WhereColumns,你可以使用 SetColumns Where 等。更新分为2种方式 1.根据表达式更新 2.根据实体或者集合更新， 具体用法请查看文档 "));
-        }
-        private void ThrowUpdateByObject()
-        {
-            Check.Exception(UpdateParameterIsNull == false, ErrorMessage.GetThrowMessage(" no support SetColumns and Where", "根据对像更新 db.Updateabe(对象) 禁止使用 SetColumns和Where ,你可以使用WhereColumns 和  UpdateColumns。 更新分为2种方式 1.根据表达式更新 2.根据实体或者集合更新 ， 具体用法请查看文档 "));
+            ThrowUpdateByObjectByMesage(" In(object[] ids) ");
+            List<IConditionalModel> conditionalModels = new List<IConditionalModel>();
+            var column = this.EntityInfo.Columns.FirstOrDefault(it => it.IsPrimarykey);
+            Check.ExceptionEasy(column == null, "In need primary key", "In需要实体有主键");
+            conditionalModels.Add(new ConditionalModel() { FieldName= column.DbColumnName, ConditionalType= ConditionalType.In,FieldValue=string.Join(",",ids),CSharpTypeName=column.UnderType?.Name } );
+            return this.Where(conditionalModels);
         }
         #endregion
+
     }
 }

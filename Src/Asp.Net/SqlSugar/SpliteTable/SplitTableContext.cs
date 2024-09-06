@@ -13,6 +13,10 @@ namespace SqlSugar
         public List<T> Items { get;  set; }
         public SplitTableContext Helper { get;  set; }
 
+        public string  GetTableName()
+        {
+            return GetTableNames().First();
+        }
         public string [] GetTableNames() 
         {
             List<string> result = new List<string>();
@@ -26,7 +30,7 @@ namespace SqlSugar
         }
         public string[] GetTableNames(SplitType splitType)
         {
-            List<string> result = new List<string>();;
+            List<string> result = new List<string>();
             foreach (var item in Items)
             {
                 result.Add(Helper.GetTableName(Helper.GetValue(splitType, item)));
@@ -54,12 +58,30 @@ namespace SqlSugar
         }
         public List<SplitTableInfo> GetTables()
         {
+            if (StaticConfig.SplitTableGetTablesFunc != null)
+            {
+                return GetCustomGetTables();
+            }
             var oldIsEnableLogEvent = this.Context.Ado.IsEnableLogEvent;
             this.Context.Ado.IsEnableLogEvent = false;
-            var tableInfos = this.Context.DbMaintenance.GetTableInfoList(false);
-            List<SplitTableInfo> result = Service.GetAllTables(this.Context,EntityInfo,tableInfos);
+            List<DbTableInfo> tableInfos =((DbMaintenanceProvider)this.Context.DbMaintenance).GetSchemaTables(EntityInfo);
+            if (tableInfos == null)
+            {
+                tableInfos = this.Context.DbMaintenance.GetTableInfoList(false);
+            }
+            List<SplitTableInfo> result = Service.GetAllTables(this.Context, EntityInfo, tableInfos);
             this.Context.Ado.IsEnableLogEvent = oldIsEnableLogEvent;
             return result;
+        }
+
+        private  List<SplitTableInfo> GetCustomGetTables()
+        {
+            var oldIsEnableLogEvent = this.Context.Ado.IsEnableLogEvent;
+            this.Context.Ado.IsEnableLogEvent = false;
+            var tables = StaticConfig.SplitTableGetTablesFunc();
+            List<SplitTableInfo> result = Service.GetAllTables(this.Context, EntityInfo, tables.Select(it=>new DbTableInfo() { Name=it.TableName }).ToList());
+            this.Context.Ado.IsEnableLogEvent = oldIsEnableLogEvent;
+            return result.ToList();
         }
 
         public string GetDefaultTableName()

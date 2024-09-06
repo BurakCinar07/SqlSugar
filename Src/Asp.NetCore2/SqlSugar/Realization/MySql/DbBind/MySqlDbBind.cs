@@ -10,7 +10,7 @@ namespace SqlSugar
         {
             if (csharpTypeName == UtilConstants.ByteArrayType.Name)
             {
-                return "blob";
+                return "longblob";
             }
             if (csharpTypeName == "Int32")
                 csharpTypeName = "int";
@@ -25,7 +25,7 @@ namespace SqlSugar
             if (csharpTypeName == "DateTimeOffset")
                 csharpTypeName = "DateTime";
             var mappings = this.MappingTypes.Where(it => it.Value.ToString().Equals(csharpTypeName, StringComparison.CurrentCultureIgnoreCase));
-            return mappings.HasValue() ? mappings.First().Key : "varchar";
+            return (mappings?.Any()==true) ? mappings.First().Key : "varchar";
         }
         public override List<KeyValuePair<string, CSharpDataType>> MappingTypes
         {
@@ -47,6 +47,7 @@ namespace SqlSugar
                     new KeyValuePair<string, CSharpDataType>("int",CSharpDataType.@int),
                     new KeyValuePair<string, CSharpDataType>("mediumint",CSharpDataType.@int),
                     new KeyValuePair<string, CSharpDataType>("integer",CSharpDataType.@int),
+                    new KeyValuePair<string, CSharpDataType>("int unsigned",CSharpDataType.@int),
 
                     new KeyValuePair<string, CSharpDataType>("varchar",CSharpDataType.@string),
                     new KeyValuePair<string, CSharpDataType>("text",CSharpDataType.@string),

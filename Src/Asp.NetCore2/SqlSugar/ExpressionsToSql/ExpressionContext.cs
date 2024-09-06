@@ -19,6 +19,7 @@ namespace SqlSugar
         #endregion
 
         #region Properties
+        public virtual ExpressionContextCase  Case{ get; set; }
         public ExpressionOutParameter SugarContext { get; set; }
         public IDbMethods DbMehtods
         {
@@ -36,7 +37,8 @@ namespace SqlSugar
             }
         }
         public int SubQueryIndex { get; set; }
-        public int JoinIndex { get; set; }
+        public int JoinIndex { get; set; } 
+        public bool IsAsAttr { get; set; }
         public int Index { get; set; }
         public int ParameterIndex { get; set; }
         public string SingleTableNameSubqueryShortName{ get;  set; }
@@ -108,6 +110,8 @@ namespace SqlSugar
         public virtual string SqlTranslationRight { get { return "]"; } }
         public virtual Action<Type> InitMappingInfo { get; set; }
         public virtual Action RefreshMapping { get; set; }
+        public virtual Type SubTableType { get;  set; }
+        public string MethodName { get;  set; }
         #endregion
 
         #region Core methods 
@@ -152,11 +156,13 @@ namespace SqlSugar
             copyContext.TableEnumIsString = this.TableEnumIsString;
             copyContext.IsSingle = this.IsSingle;
             copyContext.RootExpression = this.RootExpression;
+            copyContext.SugarContext= this.SugarContext;
             return copyContext;
         }
         #endregion
 
         #region Override methods
+        public virtual string GetLimit() { return null; }
         public virtual string GetTranslationTableName(string entityName, bool isMapping = true)
         {
             Check.ArgumentNullException(entityName, string.Format(ErrorMessage.ObjNotExist, "Table Name"));
@@ -177,7 +183,11 @@ namespace SqlSugar
             {
                 var mappingInfo = this.MappingTables.FirstOrDefault(it => it.EntityName.Equals(entityName, StringComparison.CurrentCultureIgnoreCase));
                 var name = (mappingInfo == null ? entityName : mappingInfo.DbTableName);
-                if (name.Contains("."))
+                if (name.Contains(SqlTranslationLeft) && name.Contains(SqlTranslationRight)) 
+                {
+                    return name;
+                }
+                else if (name.Contains("."))
                 {
                     return string.Join(".", name.Split('.').Select(it => SqlTranslationLeft + it + SqlTranslationRight));
                 }
@@ -198,9 +208,15 @@ namespace SqlSugar
         public virtual string GetTranslationColumnName(string columnName)
         {
             Check.ArgumentNullException(columnName, string.Format(ErrorMessage.ObjNotExist, "Column Name"));
-            if (columnName.Substring(0, 1) == this.SqlParameterKeyWord)
+            if (columnName.Substring(0, 1) == this.SqlParameterKeyWord|| columnName.Substring(0, 1) == "@")
             {
                 return columnName;
+            }
+            if (this.SugarContext?.Context?.CurrentConnectionConfig?.MoreSettings?.IsCorrectErrorSqlParameterName == true) 
+            {
+                if (IsTranslationText(columnName.Replace(" ", ""))) return columnName;
+                else
+                    return GetTranslationText(columnName);
             }
             if (IsTranslationText(columnName)) return columnName;
             if (columnName.Contains(UtilConstants.Dot))
@@ -237,6 +253,12 @@ namespace SqlSugar
         {
             if (fieldValue.Contains(".*") || fieldValue == "*") return fieldValue;
             return string.Format(" {0} {1} {2} ", GetTranslationColumnName(fieldValue), "AS", GetTranslationColumnName(asName));
+        }
+
+        public virtual string GetAsString2(string asName, string fieldValue)
+        {
+            if (fieldValue.Contains(".*") || fieldValue == "*") return fieldValue;
+            return string.Format(" {0} {1} {2} ",fieldValue, "AS", GetTranslationColumnName(asName));
         }
 
         public virtual string GetEqString(string eqName, string fieldValue)

@@ -1,4 +1,5 @@
-﻿using MySql.Data.MySqlClient;
+﻿using MySqlConnector;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -25,6 +26,10 @@ namespace SqlSugar
                         {
                             mySqlConnectionString = mySqlConnectionString.Trim().TrimEnd(';') + ";charset=utf8;";
                         }
+                        //if (!mySqlConnectionString.ToLower().Contains("min"))
+                        //{
+                        //    mySqlConnectionString = mySqlConnectionString.Trim().TrimEnd(';') + ";min pool size=1";
+                        //}
                         base._DbConnection = new MySqlConnection(mySqlConnectionString);
                     }
                     catch (Exception ex)
@@ -131,9 +136,190 @@ namespace SqlSugar
                        sqlParameter.Value = UtilMethods.ConvertFromDateTimeOffset((DateTimeOffset)sqlParameter.Value);
                     sqlParameter.DbType = System.Data.DbType.DateTime;
                 }
+                if (sqlParameter.Value is DateTime&&sqlParameter.Value.ObjToDate()==DateTime.MinValue)
+                {
+                    var date = Convert.ToDateTime(sqlParameter.Value);
+                    if (date == DateTime.MinValue)
+                    {
+                        sqlParameter.Value = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
+                    }
+                }
+                if (parameter.IsJson == false&& sqlParameter.Value!=null&& sqlParameter.Value is JArray) 
+                {
+                    sqlParameter.Value = sqlParameter.Value.ToString();
+                }
+                if (DorisHelper.IsDoris(this.Context))
+                {
+                   DorisHelper.UpdateDateParameter(sqlParameter);
+                }
                 ++index;
             }
             return result;
         }
+
+
+        protected override void SugarCatch(Exception ex, string sql, SugarParameter[] parameters)
+        {
+            base.SugarCatch(ex, sql, parameters);
+
+            if (ex is NullReferenceException&&SugarCompatible.IsFramework) 
+            {
+                Check.ExceptionEasy($"To upgrade the MySql.Data. Error:{ex.Message}", $" 请先升级MySql.Data 。 详细错误:{ex.Message}");
+            }
+        }
+
+        #region async
+        public async Task<DbCommand> GetCommandAsync(string sql, SugarParameter[] parameters)
+        {
+            MySqlCommand sqlCommand = new MySqlCommand(sql, (MySqlConnection)this.Connection);
+            sqlCommand.CommandType = this.CommandType;
+            sqlCommand.CommandTimeout = this.CommandTimeOut;
+            if (this.Transaction != null)
+            {
+                sqlCommand.Transaction = (MySqlTransaction)this.Transaction;
+            }
+            if (parameters.HasValue())
+            {
+                IDataParameter[] ipars = ToIDbDataParameter(parameters);
+                sqlCommand.Parameters.AddRange((MySqlParameter[])ipars);
+            }
+            if (this.Connection.State != ConnectionState.Open)
+            {
+                try
+                {
+                    await (this.Connection as MySqlConnection).OpenAsync();
+                }
+                catch (Exception ex)
+                {
+                    Check.Exception(true, ex.Message);
+                }
+            }
+            return sqlCommand;
+        }
+        public override async Task<int> ExecuteCommandAsync(string sql, params SugarParameter[] parameters)
+        {
+            if (this.Context.CurrentConnectionConfig?.SqlMiddle?.IsSqlMiddle == true)
+                return  await base.ExecuteCommandAsync(sql,parameters);
+            try
+            {
+                Async();
+                InitParameters(ref sql, parameters);
+                if (FormatSql != null)
+                    sql = FormatSql(sql);
+                SetConnectionStart(sql);
+                if (this.ProcessingEventStartingSQL != null)
+                    ExecuteProcessingSQL(ref sql, ref parameters);
+                ExecuteBefore(sql, parameters);
+                var sqlCommand = await GetCommandAsync(sql, parameters);
+                int count;
+                if (this.CancellationToken == null)
+                    count = await sqlCommand.ExecuteNonQueryAsync();
+                else
+                    count = await sqlCommand.ExecuteNonQueryAsync(this.CancellationToken.Value);
+                if (this.IsClearParameters)
+                    sqlCommand.Parameters.Clear();
+                ExecuteAfter(sql, parameters);
+                sqlCommand.Dispose();
+                return count;
+            }
+            catch (Exception ex)
+            {
+                CommandType = CommandType.Text;
+                if (ErrorEvent != null)
+                    ExecuteErrorEvent(sql, parameters, ex);
+                throw ex;
+            }
+            finally
+            {
+                if (this.IsAutoClose())
+                {
+                    await this.CloseAsync();
+                }
+                SetConnectionEnd(sql);
+            }
+        }
+        public override async Task<IDataReader> GetDataReaderAsync(string sql, params SugarParameter[] parameters)
+        {
+            if (this.Context.CurrentConnectionConfig?.SqlMiddle?.IsSqlMiddle == true)
+                return await base.GetDataReaderAsync(sql, parameters);
+            try
+            {
+                Async();
+                InitParameters(ref sql, parameters);
+                if (FormatSql != null)
+                    sql = FormatSql(sql);
+                SetConnectionStart(sql);
+                var isSp = this.CommandType == CommandType.StoredProcedure;
+                if (this.ProcessingEventStartingSQL != null)
+                    ExecuteProcessingSQL(ref sql, ref parameters);
+                ExecuteBefore(sql, parameters);
+                var sqlCommand = await GetCommandAsync(sql, parameters);
+                DbDataReader sqlDataReader;
+                if (this.CancellationToken == null)
+                    sqlDataReader = await sqlCommand.ExecuteReaderAsync(this.IsAutoClose() ? CommandBehavior.CloseConnection : CommandBehavior.Default);
+                else
+                    sqlDataReader = await sqlCommand.ExecuteReaderAsync(this.IsAutoClose() ? CommandBehavior.CloseConnection : CommandBehavior.Default, this.CancellationToken.Value);
+                if (isSp)
+                    DataReaderParameters = sqlCommand.Parameters;
+                if (this.IsClearParameters)
+                    sqlCommand.Parameters.Clear();
+                ExecuteAfter(sql, parameters);
+                SetConnectionEnd(sql);
+                if (SugarCompatible.IsFramework || this.Context.CurrentConnectionConfig.DbType != DbType.Sqlite)
+                    sqlCommand.Dispose();
+                return sqlDataReader;
+            }
+            catch (Exception ex)
+            {
+                CommandType = CommandType.Text;
+                if (ErrorEvent != null)
+                    ExecuteErrorEvent(sql, parameters, ex);
+                throw ex;
+            }
+        }
+        public override async Task<object> GetScalarAsync(string sql, params SugarParameter[] parameters)
+        {
+            if (this.Context.CurrentConnectionConfig?.SqlMiddle?.IsSqlMiddle == true)
+                return await base.GetScalarAsync(sql, parameters);
+            try
+            {
+                Async();
+                InitParameters(ref sql, parameters);
+                if (FormatSql != null)
+                    sql = FormatSql(sql);
+                SetConnectionStart(sql);
+                if (this.ProcessingEventStartingSQL != null)
+                    ExecuteProcessingSQL(ref sql, ref parameters);
+                ExecuteBefore(sql, parameters);
+                var sqlCommand = await GetCommandAsync(sql, parameters);
+                object scalar;
+                if (CancellationToken == null)
+                    scalar = await sqlCommand.ExecuteScalarAsync();
+                else
+                    scalar = await sqlCommand.ExecuteScalarAsync(this.CancellationToken.Value);
+                //scalar = (scalar == null ? 0 : scalar);
+                if (this.IsClearParameters)
+                    sqlCommand.Parameters.Clear();
+                ExecuteAfter(sql, parameters);
+                sqlCommand.Dispose();
+                return scalar;
+            }
+            catch (Exception ex)
+            {
+                CommandType = CommandType.Text;
+                if (ErrorEvent != null)
+                    ExecuteErrorEvent(sql, parameters, ex);
+                throw ex;
+            }
+            finally
+            {
+                if (this.IsAutoClose())
+                {
+                    await this.CloseAsync();
+                }
+                SetConnectionEnd(sql);
+            }
+        }
+        #endregion
     }
 }

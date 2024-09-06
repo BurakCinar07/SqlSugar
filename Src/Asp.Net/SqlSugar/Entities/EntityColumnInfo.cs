@@ -39,5 +39,16 @@ namespace SqlSugar
         public bool IsArray { get;  set; }
         public Type UnderType { get;  set; }
         public Navigate Navigat { get; set; }
+        public int CreateTableFieldSort { get; set; }
+        public object SqlParameterSize { get;  set; }
+        public string InsertSql { get;  set; }
+        public bool InsertServerTime { get;  set; }
+        public bool UpdateServerTime { get; set; }
+        public string UpdateSql { get; set; }
+        public object ExtendedAttribute { get;  set; }
+        public bool IsDisabledAlterColumn { get;  set; }
+        public string QuerySql { get;  set; }
+        public bool IsOwnsOne { get;  set; }
+        public PropertyInfo  ForOwnsOnePropertyInfo {   get;   set; }
     }
 }

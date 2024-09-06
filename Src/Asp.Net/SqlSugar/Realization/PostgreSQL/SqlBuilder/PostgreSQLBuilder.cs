@@ -24,14 +24,14 @@ namespace SqlSugar
         {
             get
             {
-                return "current_date";
+                return "CURRENT_TIMESTAMP";
             }
         }
         public override string FullSqlDateNow
         {
             get
             {
-                return "select current_date";
+                return "select CURRENT_TIMESTAMP";
             }
         }
 
@@ -80,6 +80,10 @@ namespace SqlSugar
             var mappingInfo = context
                 .MappingTables
                 .FirstOrDefault(it => it.EntityName.Equals(name, StringComparison.CurrentCultureIgnoreCase));
+            if (mappingInfo == null && name.Contains(".") && name.Contains("\"")) 
+            {
+                return name;
+            }
             name = (mappingInfo == null ? name : mappingInfo.DbTableName);
             if (name.Contains(".")&& !name.Contains("(")&&!name.Contains("\".\""))
             {
@@ -101,6 +105,24 @@ namespace SqlSugar
         public override string GetUnionFomatSql(string sql)
         {
             return " ( " + sql + " )  ";
+        }
+
+        public override Type GetNullType(string tableName, string columnName) 
+        {
+            if (tableName != null)
+                tableName = tableName.Trim();
+            var columnInfo=this.Context.DbMaintenance.GetColumnInfosByTableName(tableName).FirstOrDefault(z => z.DbColumnName.EqualCase(columnName));
+            if (columnInfo != null) 
+            {
+                var cTypeName=this.Context.Ado.DbBind.GetCsharpTypeNameByDbTypeName(columnInfo.DataType);
+                var value=UtilMethods.GetTypeByTypeName(cTypeName);
+                if (value != null) 
+                {
+                    var key = "GetNullType_" + tableName + columnName;
+                    return new ReflectionInoCacheService().GetOrCreate(key, () => value);
+                }
+            }
+            return null;
         }
     }
 }

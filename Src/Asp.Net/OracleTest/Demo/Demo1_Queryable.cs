@@ -31,6 +31,15 @@ namespace OrmTest
             var db = GetInstance();
             var dbTime = db.GetDate();
             var getAll = db.Queryable<Order>().ToList();
+            var first = db.Queryable<Order>().First();
+            var first2 = db.Queryable<Order>().Where(it=>it.Id>2).First();
+            var getpage = db.Queryable<Order>().ToPageList(0,5);
+            var getpage1 = db.Queryable<Order>().ToPageList(1, 1);
+            var getpage2 = db.Queryable<Order>().ToOffsetPage(0,5);
+            int count= 0;
+            var getpage3 = db.Queryable<Order>().ToOffsetPage(0, 5,ref count);
+            RefAsync<int> count2 = 0;
+            var getpage4 = db.Queryable<Order>().ToOffsetPageAsync(0, 5, count2).GetAwaiter().GetResult();
             var getOrderBy = db.Queryable<Order>().OrderBy(it => it.Name,OrderByType.Desc).ToList();
             var getOrderBy2 = db.Queryable<Order>().OrderBy(it => it.Id).OrderBy(it => it.Name, OrderByType.Desc).ToList();
             var getOrderBy3 = db.Queryable<Order>().OrderBy(it =>new { it.Name,it.Id}).ToList();
@@ -63,6 +72,23 @@ namespace OrmTest
             var test06 = db.Queryable<Order>().Select(it => SqlFunc.DateDiff(DateType.Hour, DateTime.Now, DateTime.Now.AddHours(3))).ToList();
             var test07 = db.Queryable<Order>().Select(it => it.CreateTime.DayOfWeek.ToString()).ToList();
             var test08 = db.Queryable<Order>().Select(it => it.CreateTime.AddDays(1)).ToList();
+            var test09 = db.Queryable<Order>().Select(it => new
+            {
+                names = SqlFunc.Subqueryable<Order>().Where(z => z.Id==188||z.Id==190).SelectStringJoin(z => z.Name, ",")
+            })
+            .ToList();
+            var ids = new string[] { "a", "c" };
+            var NIds = db.Queryable<Order>().Where(it => ids.Contains(it.Name, true)).ToList();
+            var Ids = db.Queryable<Order>().Where(it => ids.Contains(it.Name, false)).ToList();
+            var Ids2 = db.Queryable<Order>().Where(it => ids.Contains(it.Name)).ToList();
+            var test10 = db.Queryable<Order>().Select(it => new
+            {
+                names = $"as{it.Id}fd{it.Id}a",
+                id=SqlFunc.NewUid()
+            })
+           .ToList(); 
+            var xx =DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+            var test11= db.Queryable<Order>().Select(it =>   Convert.ToDateTime(xx)).ToList();
             Console.WriteLine("#### Examples End ####");
         }
 

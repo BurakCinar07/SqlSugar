@@ -133,6 +133,22 @@ namespace SqlSugar
     }
     public class PostgreSQLMethod : DefaultDbMethod, IDbMethods
     {
+        public override string CharIndex(MethodCallExpressionModel model)
+        {
+            return string.Format(" (strpos ({1},{0})-1)", model.Args[0].MemberName, model.Args[1].MemberName);
+        }
+        public override string CharIndexNew(MethodCallExpressionModel model)
+        {
+            return string.Format(" (strpos ({0},{1}))", model.Args[0].MemberName, model.Args[1].MemberName);
+        }
+        public override string TrueValue()
+        {
+            return "true";
+        }
+        public override string FalseValue()
+        {
+            return "false";
+        }
         public override string DateDiff(MethodCallExpressionModel model)
         {
             var parameter = (DateType)(Enum.Parse(typeof(DateType), model.Args[0].MemberValue.ObjToString()));
@@ -151,7 +167,7 @@ namespace SqlSugar
                 case DateType.Minute:
                     return $" ( ( ( DATE_PART('day', {end} - {begin}) ) * 24 + DATE_PART('hour', {end} - {begin} ) ) * 60 + DATE_PART('minute', {end} - {begin} ) )";
                 case DateType.Second:
-                    return $" ( ( ( DATE_PART('day', {end} - {begin}) ) * 24 + DATE_PART('hour', {end} - {begin} ) ) * 60 + DATE_PART('minute', {end} - {begin} ) ) * 60 + DATE_PART('minute', {end} - {begin} )";
+                    return $" ( ( ( DATE_PART('day', {end} - {begin}) ) * 24 + DATE_PART('hour', {end} - {begin} ) ) * 60 + DATE_PART('minute', {end} - {begin} ) ) * 60 + DATE_PART('second', {end} - {begin} )";
                 case DateType.Millisecond:
                     break;
                 default:
@@ -191,7 +207,7 @@ namespace SqlSugar
             }
             if (parameter2.MemberValue.ObjToString() == DateType.Hour.ToString())
             {
-                format = "hh";
+                format = "hh24";
             }
             if (parameter2.MemberValue.ObjToString() == DateType.Minute.ToString())
             {
@@ -204,6 +220,10 @@ namespace SqlSugar
             if (parameter2.MemberValue.ObjToString() == DateType.Millisecond.ToString())
             {
                 format = "ms";
+            }
+            if (parameter2.MemberValue.ObjToString() == DateType.Quarter.ToString())
+            {
+                format = "q";
             }
             if (parameter2.MemberValue.ObjToString() == DateType.Weekday.ToString())
             {
@@ -254,6 +274,10 @@ namespace SqlSugar
             var parameter3 = model.Args[2];
             DateType dateType =(DateType)parameter3.MemberValue;
             var format = "yyyy-MM-dd";
+            if (dateType == DateType.Quarter)
+            {
+                return string.Format(" (date_trunc('quarter',{0})=date_trunc('quarter',{1}) ) ", parameter.MemberName, parameter2.MemberName,format);
+            }
             switch (dateType)
             {
                 case DateType.Year:
@@ -323,7 +347,7 @@ namespace SqlSugar
         public override string ToGuid(MethodCallExpressionModel model)
         {
             var parameter = model.Args[0];
-            return string.Format(" CAST({0} AS VARCHAR)", parameter.MemberName);
+            return string.Format(" CAST({0} AS UUID)", parameter.MemberName);
         }
 
         public override string ToDouble(MethodCallExpressionModel model)
@@ -349,9 +373,24 @@ namespace SqlSugar
             var parameter = model.Args[0];
             return string.Format(" LENGTH({0})", parameter.MemberName);
         }
+        public override string IsNullOrEmpty(MethodCallExpressionModel model)
+        {
+            if ( 
+                model.Conext?.SugarContext?.Context?.CurrentConnectionConfig?.MoreSettings?.DatabaseModel == DbType.Vastbase||
+                model.Conext?.SugarContext?.Context?.CurrentConnectionConfig?.MoreSettings?.DatabaseModel == DbType.GaussDB)
+            {
+                var parameter = model.Args[0];
+                return string.Format("( {0} IS NULL )", parameter.MemberName);
+            }
+            else
+            {
+                return base.IsNullOrEmpty(model);
+            }
+        }
         public override string MergeString(params string[] strings)
         {
-            return " concat("+string.Join(",", strings).Replace("+", "") + ") ";
+            var key = Guid.NewGuid() + "";
+            return " concat("+string.Join(",", strings.Select(it=>it?.Replace("+", key))).Replace("+", "").Replace(key, "+") + ") ";
         }
         public override string IsNull(MethodCallExpressionModel model)
         {
@@ -371,6 +410,88 @@ namespace SqlSugar
         public override string EqualTrue(string fieldName)
         {
             return "( " + fieldName + "=true )";
+        }
+
+        public override string JsonField(MethodCallExpressionModel model)
+        {
+            var parameter = model.Args[0];
+            var parameter1 = model.Args[1];
+            //var parameter2 = model.Args[2];
+            //var parameter3= model.Args[3];
+            var result= GetJson(parameter.MemberName, parameter1.MemberName, model.Args.Count()==2);
+            if (model.Args.Count > 2) 
+            {
+               result = GetJson(result, model.Args[2].MemberName, model.Args.Count() == 3);
+            }
+            if (model.Args.Count > 3)
+            {
+                result = GetJson(result, model.Args[3].MemberName, model.Args.Count() == 4);
+            }
+            if (model.Args.Count > 4)
+            {
+                result = GetJson(result, model.Args[4].MemberName, model.Args.Count() == 5);
+            }
+            if (model.Args.Count > 5)
+            {
+                result = GetJson(result, model.Args[5].MemberName, model.Args.Count() == 6);
+            }
+            return result;
+        }
+
+        public override string JsonContainsFieldName(MethodCallExpressionModel model)
+        {
+            var parameter = model.Args[0];
+            var parameter1 = model.Args[1];
+            return $"({parameter.MemberName}::jsonb ?{parameter1.MemberName})";
+        }
+
+        private string GetJson(object memberName1, object memberName2,bool isLast)
+        {
+            if (isLast)
+            {
+                return $"({memberName1}::json->>{memberName2})";
+            }
+            else 
+            {
+                return $"({memberName1}->{memberName2})";
+            }
+        }
+
+        public override string JsonArrayLength(MethodCallExpressionModel model)
+        {
+            var parameter = model.Args[0];
+            //var parameter1 = model.Args[1];
+            return $" json_array_length({parameter.MemberName}::json) ";
+        }
+
+        public override string JsonParse(MethodCallExpressionModel model)
+        {
+            var parameter = model.Args[0];
+            //var parameter1 = model.Args[1];
+            return $" ({parameter.MemberName}::json) ";
+        }
+
+        public override string JsonArrayAny(MethodCallExpressionModel model)
+        {
+            if (UtilMethods.IsNumber(model.Args[1].MemberValue.GetType().Name))
+            {
+                return $" {model.Args[0].MemberName}::jsonb @> '[{model.Args[1].MemberValue.ObjToStringNoTrim().ToSqlFilter()}]'::jsonb ";
+            }
+            else 
+            {
+                return $" {model.Args[0].MemberName}::jsonb @> '[\"{model.Args[1].MemberValue}\"]'::jsonb ";
+            }
+        }
+        public override string JsonListObjectAny(MethodCallExpressionModel model)
+        {
+            if (UtilMethods.IsNumber(model.Args[2].MemberValue.GetType().Name))
+            {
+                return $" {model.Args[0].MemberName}::jsonb @> '[{{\"{model.Args[1].MemberValue}\":{model.Args[2].MemberValue}}}]'::jsonb ";
+            }
+            else
+            {
+                return $" {model.Args[0].MemberName}::jsonb @> '[{{\"{model.Args[1].MemberValue}\":\"{model.Args[2].MemberValue.ObjToStringNoTrim().ToSqlFilter()}\"}}]'::jsonb ";
+            }
         }
     }
 }

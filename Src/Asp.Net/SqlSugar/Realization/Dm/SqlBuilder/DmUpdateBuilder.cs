@@ -7,6 +7,18 @@ namespace SqlSugar
 {
     public class DmUpdateBuilder : UpdateBuilder
     {
+        public override string ReSetValueBySqlExpListType { get; set; } = "dm";
+        protected override string GetJoinUpdate(string columnsString, ref string whereString)
+        {
+            var joinString = $"  {Builder.GetTranslationColumnName(this.TableName)}  {Builder.GetTranslationColumnName(this.ShortName)} ";
+            foreach (var item in this.JoinInfos)
+            {
+                joinString += $"\r\n USING {Builder.GetTranslationColumnName(item.TableName)}  {Builder.GetTranslationColumnName(item.ShortName)} ON {item.JoinWhere} ";
+            }
+            var tableName = joinString + "\r\n ";
+            var newTemp = SqlTemplate.Replace("UPDATE", "MERGE INTO").Replace("SET", "WHEN MATCHED THEN \r\nUPDATE SET");
+            return string.Format(newTemp, tableName, columnsString, whereString);
+        }
         protected override string TomultipleSqlString(List<IGrouping<int, DbColumnInfo>> groupList)
         {
             StringBuilder sb = new StringBuilder();
@@ -14,7 +26,7 @@ namespace SqlSugar
             sb.AppendLine(string.Join("\r\n", groupList.Select(t =>
             {
                 var updateTable = string.Format("UPDATE {0} SET", base.GetTableNameStringNoWith);
-                var setValues = string.Join(",", t.Where(s => !s.IsPrimarykey).Select(m => GetOracleUpdateColums(i, m)).ToArray());
+                var setValues = string.Join(",", t.Where(s => !s.IsPrimarykey).Where(s => OldPrimaryKeys == null || !OldPrimaryKeys.Contains(s.DbColumnName)).Select(m => GetOracleUpdateColums(i, m)).ToArray());
                 var pkList = t.Where(s => s.IsPrimarykey).ToList();
                 List<string> whereList = new List<string>();
                 foreach (var item in pkList)
@@ -28,7 +40,7 @@ namespace SqlSugar
                 return string.Format("{0} {1} WHERE {2};", updateTable, setValues, string.Join("AND", whereList));
             }).ToArray()));
             var result= sb.ToString();
-            if (result == "\r\n") 
+            if (groupList.Count==0) 
             {
                 return null;
             }
@@ -37,9 +49,27 @@ namespace SqlSugar
 
         private string GetOracleUpdateColums(int i, DbColumnInfo m)
         {
-            return string.Format("\"{0}\"={1}", m.DbColumnName.ToUpper(), FormatValue(i, m.DbColumnName, m.Value));
+            return string.Format("\"{0}\"={1} ", m.DbColumnName.ToUpper(IsUppper), base.GetDbColumn(m,FormatValue(i, m.DbColumnName, m.Value)));
         }
-
+        public bool IsUppper
+        {
+            get
+            {
+                if (this.Context.CurrentConnectionConfig.MoreSettings == null)
+                {
+                    return true;
+                }
+                else
+                {
+                    return this.Context.CurrentConnectionConfig.MoreSettings.IsAutoToUpper == true;
+                }
+            }
+        }
+        public override string FormatDateTimeOffset(object value)
+        {
+            var date = UtilMethods.ConvertFromDateTimeOffset((DateTimeOffset)value);
+            return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff zzz") + "'";
+        }
         public object FormatValue(int i, string name, object value)
         {
             if (value == null)
@@ -56,7 +86,14 @@ namespace SqlSugar
                     {
                         date = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
                     }
-                    return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+                    if (this.Context.CurrentConnectionConfig?.MoreSettings?.DisableMillisecond == true)
+                    {
+                        return "to_date('" + date.ToString("yyyy-MM-dd HH:mm:ss") + "', 'YYYY-MM-DD HH24:MI:SS')  ";
+                    }
+                    else
+                    {
+                        return "to_timestamp('" + date.ToString("yyyy-MM-dd HH:mm:ss.ffffff") + "', 'YYYY-MM-DD HH24:MI:SS.FF') ";
+                    }
                 }
                 else if (type.IsEnum())
                 {

@@ -21,11 +21,22 @@ namespace SqlSugar
                     try
                     {
                         var SQLiteConnectionString = base.Context.CurrentConnectionConfig.ConnectionString;
+                        if (SQLiteConnectionString!=null&&!SQLiteConnectionString.Contains("=")) 
+                        {
+                            Check.ExceptionEasy("ConnString format error . Correct format DataSource=...", "字符串格式错误，应该是DataSource=...");
+                        }
                         base._DbConnection = new SqliteConnection(SQLiteConnectionString);
                     }
                     catch (Exception ex)
                     {
-                        Check.Exception(true, ErrorMessage.ConnnectionOpen, ex.Message);
+                        if (ex.InnerException != null)
+                        {
+                            Check.Exception(true, ErrorMessage.ConnnectionOpen, ex.Message+"\r\n"+ex.InnerException.Message);
+                        }
+                        else
+                        {
+                            Check.Exception(true, ErrorMessage.ConnnectionOpen, ex.Message);
+                        }
                     }
                 }
                 return base._DbConnection;
@@ -114,6 +125,12 @@ namespace SqlSugar
                 if (isVarchar && sqlParameter.DbType == System.Data.DbType.String)
                 {
                     sqlParameter.DbType = System.Data.DbType.AnsiString;
+                }
+                else if (parameter.DbType == System.Data.DbType.DateTimeOffset)
+                {
+                    if (sqlParameter.Value != DBNull.Value)
+                        sqlParameter.Value = UtilMethods.ConvertFromDateTimeOffset((DateTimeOffset)sqlParameter.Value);
+                    sqlParameter.DbType = System.Data.DbType.DateTime;
                 }
                 ++index;
             }

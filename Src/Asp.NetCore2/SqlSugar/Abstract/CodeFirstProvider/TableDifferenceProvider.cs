@@ -58,6 +58,8 @@ namespace SqlSugar
             foreach (var tableInfo in tableInfos)
             {
                 TableDifferenceInfo addItem = new TableDifferenceInfo();
+                if (tableInfo.OldTableInfo == null)
+                    tableInfo.OldTableInfo = new DbTableInfo();
                 addItem.TableName = tableInfo.OldTableInfo.Name;
                 addItem.AddColums = GetAddColumn(tableInfo);
                 addItem.UpdateColums = GetUpdateColumn(tableInfo);
@@ -83,7 +85,10 @@ namespace SqlSugar
                      z.Length != y.Length ||
                      z.ColumnDescription != y.ColumnDescription ||
                      z.DataType != y.DataType ||
-                     z.DecimalDigits != y.DecimalDigits
+                     z.DecimalDigits != y.DecimalDigits||
+                     z.IsPrimarykey != y.IsPrimarykey  ||
+                     z.IsIdentity!=y.IsIdentity||
+                     z.IsNullable!=y.IsNullable
                   ))).Select(it => new DiffColumsInfo()
                   {
                      Message= GetUpdateColumnString(it, tableInfo.OldColumnInfos.FirstOrDefault(y => y.DbColumnName.EqualCase(it.DbColumnName)))

@@ -17,7 +17,7 @@ namespace OrmTest
 
             };
             //建表 
-            if (!db.DbMaintenance.IsAnyTable("Test0011", false))
+            if (!db.DbMaintenance.IsAnyTable("Test001111", false))
             {
                 db.CodeFirst.InitTables<Test001111>();
             }
@@ -28,8 +28,8 @@ namespace OrmTest
             var result = db.Insertable(new Test001111() { id = dt }).ExecuteCommand();//用例代码
             var res = db.Queryable<Test001111>().WhereClass(new Test001111() { id = dt }).ToList();
             //Console.WriteLine(result);
-            Console.WriteLine("用例跑完");
-            Console.ReadKey();
+            //Console.WriteLine("用例跑完");
+            //Console.ReadKey();
         }
         //建类
         public class Test001111

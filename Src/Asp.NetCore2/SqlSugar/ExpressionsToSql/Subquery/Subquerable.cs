@@ -17,12 +17,28 @@ namespace SqlSugar
         {
             return new Subqueryable<T, JoinType>();
         }
+
+        public Subqueryable<T, JoinType> InnerJoin<JoinType>(Func<T, JoinType, bool> expression,string tableName)
+        {
+            return new Subqueryable<T, JoinType>();
+        }
+
         public Subqueryable<T, JoinType> LeftJoin<JoinType>(Func<T, JoinType, bool> expression)
         {
             return new Subqueryable<T, JoinType>();
         }
-   
+
+        public Subqueryable<T, JoinType> LeftJoin<JoinType>(Func<T, JoinType, bool> expression,string tableName)
+        {
+            return new Subqueryable<T, JoinType>();
+        }
+         
+
         public Subqueryable<T> Where(string where)
+        {
+            return this;
+        }
+        public Subqueryable<T> Where(List<IConditionalModel> conditionals)
         {
             return this;
         }
@@ -71,7 +87,7 @@ namespace SqlSugar
             return this;
         }
 
-        public TResult Select<TResult>(Func<T, TResult> expression) where TResult :struct
+        public TResult Select<TResult>(Func<T, TResult> expression)  
         {
             return default(TResult);
         }
@@ -84,7 +100,12 @@ namespace SqlSugar
             return default(string);
         }
 
-        public TResult Max<TResult>(Func<T, TResult> expression) where TResult : struct
+        public string SelectStringJoin(Func<T, string> expression,string separator)
+        {
+            return default(string);
+        }
+
+        public TResult Max<TResult>(Func<T, TResult> expression)  
         {
             return default(TResult);
         }
@@ -101,7 +122,7 @@ namespace SqlSugar
         {
             return default(string);
         }
-        public TResult Min<TResult>(Func<T, TResult> expression) where TResult : struct
+        public TResult Min<TResult>(Func<T, TResult> expression) 
         {
             return default(TResult);
         }
@@ -115,7 +136,12 @@ namespace SqlSugar
         {
             return default(string);
         }
-        public TResult Sum<TResult>(Func<T, TResult> expression) where TResult : struct
+
+        public int DistinctCount(Func<T, object> expression) 
+        {
+            return default(int);
+        }
+        public TResult Sum<TResult>(Func<T, TResult> expression) 
         {
             return default(TResult);
         }
@@ -150,6 +176,53 @@ namespace SqlSugar
         public int Count()
         {
             return default(int);
+        }
+
+        public Subqueryable<T> WithNoLock()
+        {
+            return this;
+        }
+        public Subqueryable<T> EnableTableFilter()
+        {
+            return this;
+        }
+
+        public List<T> ToList()
+        {
+            return new List<T>();
+        }
+        public List<TResult> ToList<TResult>(Func<T, TResult> selector)
+        {
+            return null;
+        }
+        public List<TResult> ToList<TResult>()
+        {
+            return null;
+        }
+        public List<TResult> ToList<TResult>(Func<T, TResult> selector,bool isAutoDto)where TResult : class, new()
+        {
+            return null;
+        }
+        public T First()
+        {
+            return default(T);
+        }
+        public TResult First<TResult>(Func<T, TResult> selector) where TResult : class, new()
+        {
+            return default(TResult);
+        }
+        public TResult First<TResult>(Func<T, TResult> selector, bool isAutoDto) where TResult : class, new()
+        {
+            return default(TResult);
+        }
+        public TResult First<TResult>() where TResult : class, new()
+        {
+            return default(TResult);
+        }
+
+        public Subqueryable<T> AsWithAttr()
+        {
+            return this;
         }
     }
 }

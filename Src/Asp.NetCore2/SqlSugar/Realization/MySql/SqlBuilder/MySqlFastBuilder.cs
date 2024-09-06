@@ -1,4 +1,4 @@
-﻿using MySql.Data.MySqlClient;
+﻿using MySqlConnector;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -11,13 +11,20 @@ using System.Threading.Tasks;
 namespace SqlSugar 
 {
    
-    public class MySqlFastBuilder:FastBuilder,IFastBuilder
+    public partial class MySqlFastBuilder:FastBuilder,IFastBuilder
     {
         public override string UpdateSql { get; set; } = @"UPDATE  {1} TM    INNER JOIN {2} TE  ON {3} SET {0} ";
         public async Task<int> ExecuteBulkCopyAsync(DataTable dt)
-        {
-
-            var dllPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "failFiles");
+        { 
+            if (dt.Columns.Cast<DataColumn>().Any(it => it.DataType == UtilConstants.ByteArrayType)) 
+            {
+                return await MySqlConnectorBulkCopy(dt);
+            } 
+            var dllPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bulkcopyfiles");
+            if (StaticConfig.BulkCopy_MySqlCsvPath.HasValue()) 
+            {
+                dllPath = StaticConfig.BulkCopy_MySqlCsvPath;
+            }
             DirectoryInfo dir = new DirectoryInfo(dllPath);
             if (!dir.Exists)
             {
@@ -34,7 +41,7 @@ namespace SqlSugar
                 // IsolationLevel.Parse
                 MySqlBulkLoader bulk = new MySqlBulkLoader(conn)
                 {
-                    CharacterSet = "UTF8",
+                    CharacterSet = "utf8mb4",
                     FieldTerminator = ",",
                     FieldQuotationCharacter = '"',
                     EscapeCharacter = '"',
@@ -56,15 +63,24 @@ namespace SqlSugar
                     File.Delete(fileName);
                 }
             }
-            catch (MySqlException ex)
+            catch (Exception ex)
             {
                 if (ex.Message == "The used command is not allowed with this MySQL version")
                 {
                     Check.ExceptionEasy("connection string add : AllowLoadLocalInfile=true", "BulkCopy MySql连接字符串需要添加 AllowLoadLocalInfile=true; 添加后如果还不行Mysql数据库执行一下 SET GLOBAL local_infile=1 ");
                 }
+                else if (ex.Message.Contains("To use MySqlBulkLoader.Local=true, set Allo")) 
+                {
+                    Check.ExceptionEasy("connection string add : AllowLoadLocalInfile=true", "BulkCopy MySql连接字符串需要添加 AllowLoadLocalInfile=true; 添加后如果还不行Mysql数据库执行一下 SET GLOBAL local_infile=1 ");
+                }
+                else if (ex.Message == "Loading local data is disabled; this must be enabled on both the client and server sides")
+                {
+                    this.Context.Ado.ExecuteCommand("SET GLOBAL local_infile=1");
+                    Check.ExceptionEasy(ex.Message, " 检测到你没有开启文件，AllowLoadLocalInfile=true加到自符串上，已自动执行 SET GLOBAL local_infile=1 在试一次");
+                }
                 else
                 {
-                    throw ex;
+                    throw;
                 }
             }
             finally

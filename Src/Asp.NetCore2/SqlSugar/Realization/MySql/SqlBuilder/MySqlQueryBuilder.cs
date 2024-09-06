@@ -44,7 +44,7 @@ namespace SqlSugar
             if (Skip != null && Take == null)
             {
                 if (this.OrderByValue == "ORDER BY ") this.OrderByValue += GetSelectValue.Split(',')[0];
-                result = string.Format(PageTempalte, GetSelectValue, GetTableNameString, GetWhereValueString, GetGroupByString + HavingInfos, (Skip != null || Take != null) ? null : GetOrderByString, Skip.ObjToInt(), long.MaxValue);
+                result = string.Format(PageTempalte, GetSelectValue, GetTableNameString, GetWhereValueString, GetGroupByString + HavingInfos, GetOrderByString, Skip.ObjToInt(), long.MaxValue);
             }
             else if (Skip == null && Take != null)
             {
@@ -53,6 +53,10 @@ namespace SqlSugar
             }
             else if (Skip != null && Take != null)
             {
+                if (Skip == 0 && Take == 1 && this.OrderByValue == "ORDER BY NOW() ")
+                {
+                    this.OrderByValue = null;
+                }
                 if (this.OrderByValue == "ORDER BY ") this.OrderByValue += GetSelectValue.Split(',')[0];
                 result = string.Format(PageTempalte, GetSelectValue, GetTableNameString, GetWhereValueString, GetGroupByString + HavingInfos, GetOrderByString, Skip.ObjToInt() > 0 ? Skip.ObjToInt() : 0, Take);
             }
@@ -111,7 +115,7 @@ namespace SqlSugar
         }
         public override string ToCountSql(string sql)
         {
-            if (this.GroupByValue.HasValue())
+            if (this.GroupByValue.HasValue()||this.IsDistinct)
             {
                 return base.ToCountSql(sql);
             }
@@ -143,6 +147,10 @@ namespace SqlSugar
                 if (IsDistinct)
                 {
                     result = " DISTINCT " + result;
+                }
+                if (this.SubToListParameters != null && this.SubToListParameters.Any())
+                {
+                    result = SubToListMethod(result);
                 }
                 return result;
             }

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
@@ -44,16 +45,19 @@ namespace SqlSugar
                 var type = UtilMethods.GetUnderType(value.GetType());
                 if (type == UtilConstants.DateType)
                 {
-                    var date = value.ObjToDate();
-                    if (date < UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig))
-                    {
-                        date = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
-                    }
-                    return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+                    return GetDateTimeString(value);
+                }
+                else if (value is DateTimeOffset)
+                {
+                    return GetDateTimeOffsetString(value);
                 }
                 else if (type == UtilConstants.ByteArrayType)
                 {
                     string bytesString = "0x" + BitConverter.ToString((byte[])value).Replace("-", "");
+                    if (bytesString == "0x") 
+                    {
+                        bytesString = "''";
+                    }
                     return bytesString;
                 }
                 else if (type.IsEnum())
@@ -74,7 +78,7 @@ namespace SqlSugar
                 else if (type == UtilConstants.StringType || type == UtilConstants.ObjType)
                 {
                     ++i;
-                    var parameterName = this.Builder.SqlParameterKeyWord + name + i;
+                    var parameterName = this.Builder.SqlParameterKeyWord + name +"_"+ i;
                     this.Parameters.Add(new SugarParameter(parameterName, value));
                     return parameterName;
                 }
@@ -84,6 +88,27 @@ namespace SqlSugar
                 }
             }
         }
+
+        private object GetDateTimeOffsetString(object value)
+        {
+            var date = UtilMethods.ConvertFromDateTimeOffset((DateTimeOffset)value);
+            if (date < UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig))
+            {
+                date = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
+            }
+            return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+        }
+
+        private object GetDateTimeString(object value)
+        {
+            var date = value.ObjToDate();
+            if (date < UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig))
+            {
+                date = UtilMethods.GetMinDate(this.Context.CurrentConnectionConfig);
+            }
+            return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+        }
+
         private string GetString(object value)
         {
             var result = value.ToString();
@@ -105,9 +130,11 @@ namespace SqlSugar
             string columnsString = string.Join(",", groupList.First().Select(it => Builder.GetTranslationColumnName(it.DbColumnName)));
             if (isSingle)
             {
-                string columnParametersString = string.Join(",", this.DbColumnInfoList.Select(it => Builder.SqlParameterKeyWord + it.DbColumnName));
+                string columnParametersString = string.Join(",", this.DbColumnInfoList.Select(it =>base.GetDbColumn(it, Builder.SqlParameterKeyWord + it.DbColumnName)));
                 ActionMinDate();
-                return string.Format(SqlTemplate, GetTableNameString, columnsString, columnParametersString);
+                var result= string.Format(SqlTemplate, GetTableNameString, columnsString, columnParametersString);
+                result = GetMySqlIgnore(result);
+                return result;
             }
             else
             {
@@ -120,7 +147,7 @@ namespace SqlSugar
                 foreach (var item in groupList)
                 {
                     batchInsetrSql.Append("(");
-                    insertColumns = string.Join(",", item.Select(it => FormatValue(it.Value,it.PropertyName)));
+                    insertColumns = string.Join(",", item.Select(it => base.GetDbColumn(it, FormatValue(it.Value, it.PropertyName))));
                     batchInsetrSql.Append(insertColumns);
                     if (groupList.Last() == item)
                     {
@@ -131,11 +158,28 @@ namespace SqlSugar
                         batchInsetrSql.Append("),  ");
                     }
                 }
-               
-                batchInsetrSql.AppendLine(";select @@IDENTITY");
+                if (DorisHelper.IsDoris(this.Context))
+                {
+                    //doris insert ignore
+                }
+                else
+                {
+                    batchInsetrSql.AppendLine(";select @@IDENTITY");
+                }
                 var result = batchInsetrSql.ToString();
+                result = GetMySqlIgnore(result);
                 return result;
             }
+        }
+
+        private string GetMySqlIgnore(string result)
+        {
+            if (this.MySqlIgnore)
+            {
+                result = result.Replace("INSERT INTO", " INSERT IGNORE INTO");
+            }
+
+            return result;
         }
     }
 }

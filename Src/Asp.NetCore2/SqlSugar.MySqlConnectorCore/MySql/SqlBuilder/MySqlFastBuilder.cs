@@ -17,7 +17,7 @@ namespace SqlSugar.MySqlConnector
         public async Task<int> ExecuteBulkCopyAsync(DataTable dt)
         {
 
-            var dllPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "failFiles");
+            var dllPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bulkcopyfiles");
             DirectoryInfo dir = new DirectoryInfo(dllPath);
             if (!dir.Exists)
             {
@@ -34,7 +34,7 @@ namespace SqlSugar.MySqlConnector
                 // IsolationLevel.Parse
                 MySqlBulkLoader bulk = new MySqlBulkLoader(conn)
                 {
-                    CharacterSet = "UTF8",
+                    CharacterSet = "utf8mb4",
                     FieldTerminator = ",",
                     FieldQuotationCharacter = '"',
                     EscapeCharacter = '"',
@@ -58,7 +58,19 @@ namespace SqlSugar.MySqlConnector
             }
             catch (MySqlException ex)
             {
-                throw ex;
+                if (ex.Message == "The used command is not allowed with this MySQL version")
+                {
+                    Check.ExceptionEasy("connection string add : AllowLoadLocalInfile=true", "BulkCopy MySql连接字符串需要添加 AllowLoadLocalInfile=true; 添加后如果还不行Mysql数据库执行一下 SET GLOBAL local_infile=1 ");
+                }
+                else if (ex.Message == "Loading local data is disabled; this must be enabled on both the client and server sides")
+                {
+                    this.Context.Ado.ExecuteCommand("SET GLOBAL local_infile=1");
+                    Check.ExceptionEasy(ex.Message, " 检测到你没有开启文件，已自动执行 SET GLOBAL local_infile=1 在试一次");
+                }
+                else 
+                {
+                    throw;
+                }
             }
             finally
             {

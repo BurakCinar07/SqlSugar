@@ -41,6 +41,17 @@ namespace SqlSugar
             var mappings = this.MappingTypes.Where(it => it.Key == dbTypeName);
             return mappings.HasValue() ? mappings.First().Key : "string";
         }
+
+        public string GetCsharpTypeNameByDbTypeName(string dbTypeName)
+        {
+            var mappings = this.MappingTypes.Where(it => it.Key == dbTypeName);
+            if (mappings == null || mappings.Count() == 0)
+            {
+                return "string";
+            }
+            var result = mappings.First().Value.ObjToString();
+            return result;
+        }
         public virtual string GetConvertString(string dbTypeName)
         {
             string result = string.Empty;
@@ -98,6 +109,9 @@ namespace SqlSugar
 
                 #region Double
                 case "float":
+                    result = "Convert.ToSingle"; 
+                    break;
+                case "double":
                     result = "Convert.ToDouble";
                     break;
                 #endregion
@@ -316,7 +330,7 @@ namespace SqlSugar
         {
             get
             {
-                return new List<string>() { "int32", "datetime", "decimal", "double", "byte" };
+                return new List<string>() { "int32", "datetime", "decimal", "double", "byte", "int64", "uint32", "uint64" };
             }
         }
         #endregion

@@ -19,6 +19,7 @@ namespace SqlSugar
         public StringBuilder sql { get; set; }
         public ISqlBuilder Builder { get; set; }
         public string TableWithString { get; set; }
+        public string AsName { get; set; }
         public virtual List<string> WhereInfos
         {
             get
@@ -33,7 +34,7 @@ namespace SqlSugar
         #endregion
 
         #region Sql Template
-        public string SqlTemplate
+        public virtual string SqlTemplate
         {
             get
             {
@@ -83,6 +84,10 @@ namespace SqlSugar
             get
             {
                 var result = Builder.GetTranslationTableName(EntityInfo.EntityName);
+                if (AsName.HasValue()) 
+                {
+                    result = Builder.GetTranslationColumnName(AsName);
+                }
                 result += UtilConstants.Space;
                 if (this.TableWithString.HasValue())
                 {

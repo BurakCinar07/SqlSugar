@@ -11,23 +11,67 @@ namespace SqlSugar
         public ConstantExpressionResolve(ExpressionParameter parameter) : base(parameter)
         {
             var expression = base.Expression as ConstantExpression;
-            var isLeft = parameter.IsLeft;
-            object value = ExpressionTool.GetValue(expression.Value,this.Context);
-            if (this.Context.TableEnumIsString == true
-                       && value != null
-                         && value.IsInt()
-                          && base.BaseParameter?.OppsiteExpression != null)
+            string customParameter = GetCustomParameter(parameter, expression);
+            if (customParameter == null)
             {
-                if (base.BaseParameter?.OppsiteExpression is UnaryExpression)
+                DefaultConstant(parameter, expression);
+            }
+            else
+            {
+                CustomConstant(parameter, customParameter);
+            }
+        }
+
+        private void CustomConstant(ExpressionParameter parameter, string customParameter)
+        {
+            var baseParameter = parameter.BaseParameter;
+            var isSetTempData = baseParameter.CommonTempData.HasValue() && baseParameter.CommonTempData.Equals(CommonTempDataType.Result);
+            if (isSetTempData)
+            {
+                baseParameter.CommonTempData = customParameter;
+            }
+            else
+            {
+                AppendMember(parameter, parameter.IsLeft, customParameter);
+            }
+        }
+
+        private string GetCustomParameter(ExpressionParameter parameter, ConstantExpression expression)
+        {
+            string customParameter = null;
+            if (parameter.OppsiteExpression != null)
+            {
+                var exp = ExpressionTool.RemoveConvert(parameter.OppsiteExpression);
+                if (exp is MemberExpression)
                 {
-                    var oppsiteExpression = base.BaseParameter?.OppsiteExpression as UnaryExpression;
-                    var oppsiteValue = oppsiteExpression.Operand;
-                    if (oppsiteValue.Type.IsEnum())
+                    var member = (exp as MemberExpression);
+                    var memberParent = member.Expression;
+                    if (memberParent != null&& this.Context?.SugarContext?.Context!=null)
                     {
-                        value = UtilMethods.ChangeType2(value, oppsiteValue.Type).ToString();
+                        var entity = this.Context.SugarContext.Context.EntityMaintenance.GetEntityInfo(memberParent.Type);
+                        var columnInfo = entity.Columns.FirstOrDefault(it => it.PropertyName == member.Member.Name);
+                        if (columnInfo?.SqlParameterDbType is Type)
+                        {
+                            var type = columnInfo.SqlParameterDbType as Type;
+                            var ParameterConverter = type.GetMethod("ParameterConverter").MakeGenericMethod(columnInfo.PropertyInfo.PropertyType);
+                            var obj=Activator.CreateInstance(type);
+                            var p = ParameterConverter.Invoke(obj, new object[] { expression.Value, 100 }) as SugarParameter;
+                            customParameter = base.AppendParameter(p);
+
+                        }
                     }
                 }
             }
+            return customParameter;
+        }
+
+        private void DefaultConstant(ExpressionParameter parameter, ConstantExpression expression)
+        {
+            var isLeft = parameter.IsLeft;
+            object value = ExpressionTool.GetValue(expression.Value, this.Context);
+            value = ConvetValue(parameter, expression, value);
+            if (IsEnumString(value))
+                value = ConvertEnum(value);
             var baseParameter = parameter.BaseParameter;
             baseParameter.ChildExpression = expression;
             var isSetTempData = baseParameter.CommonTempData.HasValue() && baseParameter.CommonTempData.Equals(CommonTempDataType.Result);
@@ -80,6 +124,42 @@ namespace SqlSugar
                 default:
                     break;
             }
+        }
+
+        private object ConvetValue(ExpressionParameter parameter, ConstantExpression expression, object value)
+        {
+            if (expression.Type == UtilConstants.IntType && parameter.OppsiteExpression != null &&ExpressionTool.IsUnConvertExpress(parameter.OppsiteExpression))
+            {
+                var exp = ExpressionTool.RemoveConvert(parameter.OppsiteExpression);
+                if (exp.Type == typeof(char)&& value is int) {
+                    value = Convert.ToChar(Convert.ToInt32(value));
+                }
+            }
+
+            return value;
+        }
+
+        private object ConvertEnum(object value)
+        {
+            if (base.BaseParameter?.OppsiteExpression is UnaryExpression)
+            {
+                var oppsiteExpression = base.BaseParameter?.OppsiteExpression as UnaryExpression;
+                var oppsiteValue = oppsiteExpression.Operand;
+                if (oppsiteValue.Type.IsEnum())
+                {
+                    value = UtilMethods.ChangeType2(value, oppsiteValue.Type).ToString();
+                }
+            }
+
+            return value;
+        }
+
+        private bool IsEnumString(object value)
+        {
+            return this.Context.TableEnumIsString == true
+                                   && value != null
+                                     && value.IsInt()
+                                      && base.BaseParameter?.OppsiteExpression != null;
         }
     }
 }

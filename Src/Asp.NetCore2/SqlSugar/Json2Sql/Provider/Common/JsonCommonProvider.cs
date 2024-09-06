@@ -11,10 +11,26 @@ namespace SqlSugar
         {
             //this.context = context;
             this.sqlBuilder = InstanceFactory.GetSqlbuilder(context.CurrentConnectionConfig);
-            this.sqlBuilder.Context =  (context as SqlSugarClient).Context;
+            if (context is SqlSugarProvider)
+            {
+                this.sqlBuilder.Context = context as SqlSugarProvider;
+            }
+            else if (context is SqlSugarScopeProvider)
+            {
+                this.sqlBuilder.Context = (context as SqlSugarScopeProvider).conn;
+            }
+            else if(context is SqlSugarScope)
+            {
+                this.sqlBuilder.Context = (context as SqlSugarScope).GetConnection(context.CurrentConnectionConfig.ConfigId);
+            }
+            else
+            {
+                this.sqlBuilder.Context = (context as SqlSugarClient).Context;
+            }
         }
         //public ISqlSugarClient context { get; set; }
         public ISqlBuilder sqlBuilder { get; set; }
+        public int ParameterIndex { get { return ((SqlBuilderProvider)sqlBuilder)?.GetParameterNameIndex??0; } }
         public JsonTableNameInfo GetTableName(JToken item)
         {
             JsonTableNameInfo jsonTableNameInfo = new JsonTableNameInfo();

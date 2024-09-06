@@ -72,6 +72,13 @@ namespace SqlSugar
             return ToQueryable().Select<SingleColumnEntity<Y>>();
         }
 
+        private bool _isOnlySelectEntity = false;
+        public ISugarQueryable<SingleColumnEntity<Y>> ToQueryable<Y>(bool isOnlySelectEntity)
+        {
+            _isOnlySelectEntity = isOnlySelectEntity;
+            return ToQueryable<Y>();
+        }
+
         private void Each<Y>(StringBuilder sb, List<Y> list)
         {
             int i = 0;
@@ -96,7 +103,10 @@ namespace SqlSugar
             var columns = new StringBuilder();
             var entity=this.Context.EntityMaintenance.GetEntityInfo<T>();
             columns.Append(string.Join(",",entity.Columns.Where(it=>it.IsIgnore==false).Select(it=>GetSelect(it,data))));
-            columns.Append(",null as NoCacheColumn");
+            if (_isOnlySelectEntity==false)
+            {
+                columns.Append(",null as NoCacheColumn");
+            }
             sb.AppendLine(" SELECT " + columns.ToString());
             sb.Append(GetNextSql);
             if (!isLast)
@@ -108,13 +118,13 @@ namespace SqlSugar
         private object GetSelect<Y>(EntityColumnInfo it,Y  data)
         {
 
-            return string.Format(" {0} AS {1} ", FormatValue(it.PropertyInfo.GetValue(data,null), it),it.PropertyName);
+            return string.Format(" {0} AS {1} ", FormatValue(it.PropertyInfo.GetValue(data,null), it),queryBuilder.Builder.GetTranslationColumnName(it.PropertyName));
         }
 
         private void NoClassMethod<Y>(Y data, StringBuilder sb,bool isLast)
         {
             sb.AppendLine(" SELECT "+  FormatValue(data));
-            sb.Append(" AS ColumnName ");
+            sb.Append(" AS "+this.queryBuilder.Builder.GetTranslationColumnName("ColumnName") +" ");
             sb.Append(GetNextSql);
             if (!isLast)
             {
@@ -125,7 +135,8 @@ namespace SqlSugar
         {
             get
             {
-                if (this.Context.CurrentConnectionConfig.DbType == DbType.Oracle)
+                var isDual=queryBuilder.Builder.FullSqlDateNow?.ToLower()?.Contains(" dual")==true;
+                if (isDual)
                 {
                     return " from dual ";
                 }
@@ -200,6 +211,10 @@ namespace SqlSugar
             {
                 return $" CAST( NULL AS DATETIME) ";
             }
+            else if (entityColumnInfo != null && entityColumnInfo.UnderType == UtilConstants.DateType && value == null && this.Context.CurrentConnectionConfig.DbType == DbType.PostgreSQL)
+            {
+                return $" CAST( NULL AS timestamp) ";
+            }
             if (value == null)
                 return "null";
             var type =UtilMethods.GetUnderType(value.GetType());
@@ -220,7 +235,21 @@ namespace SqlSugar
                 });
                 return result;
             }
-            else if (type.IsIn(typeof(DateTime))) 
+            else if (type.IsIn(typeof(Guid)))
+            {
+                Expression<Func<SingleColumnEntity<object>, object>> exp = it => Convert.ToDecimal(it.ColumnName);
+                var result = queryBuilder.LambdaExpressions.DbMehtods.ToGuid(new MethodCallExpressionModel()
+                {
+                    Args = new List<MethodCallExpressionArgs>() {
+                  new MethodCallExpressionArgs(){
+                   IsMember=true,
+                   MemberName= formatBuilder.FormatValue(value)
+                  }
+                 }
+                });
+                return result;
+            }
+            else if (type.IsIn(typeof(DateTime))||type.Name== "DateOnly") 
             {
                 if (this.Context.CurrentConnectionConfig.DbType == DbType.Oracle) 
                 {

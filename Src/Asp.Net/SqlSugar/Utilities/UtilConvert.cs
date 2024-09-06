@@ -13,9 +13,24 @@ namespace SqlSugar
             if (thisValue == null) return 0;
             if (thisValue is Enum)
             {
-                return (int)thisValue;
+                return Convert.ToInt32(thisValue);
             }
             if (thisValue != null && thisValue != DBNull.Value && int.TryParse(thisValue.ToString(), out reval))
+            {
+                return reval;
+            }
+            return reval;
+        }
+
+        public static long ObjToLong(this object thisValue)
+        {
+            long reval = 0;
+            if (thisValue == null) return 0;
+            if (thisValue is Enum)
+            {
+                return Convert.ToInt64(thisValue);
+            }
+            if (thisValue != null && thisValue != DBNull.Value && long.TryParse(thisValue.ToString(), out reval))
             {
                 return reval;
             }
@@ -66,9 +81,26 @@ namespace SqlSugar
                 return thisValue == equalValue;
             }
         }
+        public static string ObjToString(this object thisValue,Func<DateTime,string> formatTime)
+        {
+            if (formatTime != null&&thisValue is DateTime)
+            {
+                var dt = Convert.ToDateTime(thisValue);
+                return formatTime(dt);
+            }
+            else 
+            {
+                return thisValue+string.Empty;
+            }
+        }
         public static string ObjToString(this object thisValue)
         {
             if (thisValue != null) return thisValue.ToString().Trim();
+            return "";
+        }
+        public static string ObjToStringNoTrim(this object thisValue)
+        {
+            if (thisValue != null) return thisValue.ToString();
             return "";
         }
         public static string ObjToStringNew(this object thisValue)
@@ -109,6 +141,10 @@ namespace SqlSugar
 
         public static DateTime ObjToDate(this object thisValue)
         {
+            if (thisValue is DateTime)
+            {
+                return (DateTime)thisValue;
+            }
             DateTime reval = DateTime.MinValue;
             if (thisValue != null && thisValue != DBNull.Value && DateTime.TryParse(thisValue.ToString(), out reval))
             {
@@ -119,6 +155,10 @@ namespace SqlSugar
 
         public static DateTime ObjToDate(this object thisValue, DateTime errorValue)
         {
+            if (thisValue is DateTime)
+            {
+                return (DateTime)thisValue;
+            }
             DateTime reval = DateTime.MinValue;
             if (thisValue != null && thisValue != DBNull.Value && DateTime.TryParse(thisValue.ToString(), out reval))
             {

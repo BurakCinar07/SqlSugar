@@ -25,6 +25,11 @@ namespace SqlSugar
                     DbColumnInfo dbColumnInfo = this.EntityColumnToDbColumn(entityInfo, tableName, item);
                     columns.Add(dbColumnInfo);
                 }
+                if (entityInfo.IsCreateTableFiledSort)
+                {
+                    columns = columns.OrderBy(c => c.CreateTableFieldSort).ToList();
+                    columns = columns.OrderBy(it => it.IsPrimarykey ? 0 : 1).ToList();
+                }
             }
             this.Context.DbMaintenance.CreateTable(tableName, columns,true);
         }
@@ -42,7 +47,8 @@ namespace SqlSugar
                 DefaultValue = item.DefaultValue,
                 ColumnDescription = item.ColumnDescription,
                 Length = item.Length,
-                DecimalDigits=item.DecimalDigits
+                DecimalDigits=item.DecimalDigits,
+                CreateTableFieldSort = item.CreateTableFieldSort
             };
             GetDbType(item, propertyType, result);
             if (result.DataType.Equals("varchar", StringComparison.CurrentCultureIgnoreCase) && result.Length == 0)
@@ -75,6 +81,65 @@ namespace SqlSugar
         internal DbColumnInfo GetEntityColumnToDbColumn(EntityInfo entity, string dbTableName, EntityColumnInfo item)
         {
             return EntityColumnToDbColumn(entity,dbTableName,item);
+        }
+
+        protected override void GetDbType(EntityColumnInfo item, Type propertyType, DbColumnInfo result)
+        {
+            if (!string.IsNullOrEmpty(item.DataType))
+            {
+                result.DataType = item.DataType;
+            }
+            else if (propertyType.IsEnum())
+            {
+                result.DataType = this.Context.Ado.DbBind.GetDbTypeName(item.Length > 9 ? UtilConstants.LongType.Name : UtilConstants.IntType.Name);
+            }
+            else if (item.IsJson && item.DataType == null)
+            {
+                result.DataType = "json";
+            }
+            else if (propertyType == UtilConstants.DecType&&item.Length==0&&item.DecimalDigits==0) 
+            {
+                result.Length = 18;
+                result.DecimalDigits = 4;
+                result.DataType = "decimal";
+            }
+            else
+            {
+                var name = GetType(propertyType.Name);
+                if (name == "Boolean")
+                {
+                    result.DataType = "tinyint";
+                    result.Length = 1;
+                    result.Scale = 0;
+                    result.DecimalDigits = 0;
+                }
+                else
+                {
+                    result.DataType = this.Context.Ado.DbBind.GetDbTypeName(name);
+                    if (name == "Guid" && result.DataType == "varchar"&&result.Length<=1) 
+                    {
+                        result.Length = 36;
+                    }
+                }
+            }
+        }
+
+
+        protected override bool IsNoSamgeType(EntityColumnInfo ec, DbColumnInfo dc)
+        {
+            if (ec.UnderType==UtilConstants.BoolType && dc.DataType == "tinyint" && dc.Length == 1)
+            {
+                return false;
+            }
+            else if (ec.UnderType == UtilConstants.DobType && dc.DataType== "double")
+            {
+                return false;
+            }
+            else if (ec.UnderType == UtilConstants.DateType && dc.DataType?.StartsWith("datetime")==true)
+            {
+                return false;
+            }
+            return base.IsNoSamgeType(ec, dc);
         }
     }
 }

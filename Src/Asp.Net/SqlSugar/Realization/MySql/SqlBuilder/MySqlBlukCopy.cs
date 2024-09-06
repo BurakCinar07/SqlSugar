@@ -131,7 +131,7 @@ namespace SqlSugar
         {
             if (this.Chara == null)
             {
-                return "UTF8";
+                return "utf8mb4";
             }
             else
             {
@@ -164,17 +164,28 @@ namespace SqlSugar
                 {
                     colum = table.Columns[i];
                     if (i != 0) sb.Append(",");
-                    if (colum.DataType == typeof(string) && (row[colum].ToString().Contains(",") || row[colum].ToString().Contains("\r") || row[colum].ToString().Contains("\"")))
+                    if (colum.DataType == typeof(string) && (row[colum].ToString().Contains(",") || row[colum].ToString().Contains("\r") || row[colum].ToString().Contains("\"") || row[colum].ToString().Contains("\n")))
                     {
                         sb.Append("\"" + row[colum].ToString().Replace("\"", "\"\"") + "\"");
                     }
                     else if (colum.DataType == typeof(bool))
                     {
-                        sb.Append(row[colum].ObjToBool() ? 1 : 0);
+                        if (row[colum] == DBNull.Value)
+                        {
+                            sb.Append("NULL");
+                        }
+                        else
+                        {
+                            sb.Append(row[colum].ObjToBool() ? 1 : 0);
+                        }
                     }
                     else if (colum.DataType == UtilConstants.DateType&& row[colum] != null && row[colum] != DBNull.Value) 
                     {
                         sb.Append(row[colum].ObjToDate().ToString("yyyy-MM-dd HH:mm:ss.fff"));
+                    }
+                    else if (row[colum] == null || row[colum] == DBNull.Value)
+                    {
+                        sb.Append("NULL");
                     }
                     else sb.Append(row[colum].ToString());
                 }

@@ -153,62 +153,68 @@ namespace SqlSugar
         }
         public void InitMappingInfo(Type type)
         {
-            string cacheKey = "Context.InitAttributeMappingTables" + type.FullName;
+            string cacheKey = "Context.InitAttributeMappingTables" + type.FullName+this.Context?.CurrentConnectionConfig?.ConfigId;
             var entityInfo = this.Context.Utilities.GetReflectionInoCacheInstance().GetOrCreate<EntityInfo>(cacheKey,
               () =>
               {
-                  var result = this.Context.EntityMaintenance.GetEntityInfo(type);
+                  var result = this.Context.EntityMaintenance.GetEntityInfoWithAttr(type);
                   return result;
               });
-            var copyObj = CopyEntityInfo(entityInfo);
-            InitMappingInfo(copyObj);
+            //var copyObj = CopyEntityInfo(entityInfo);
+            InitMappingInfo(entityInfo);
         }
         public void InitMappingInfoNoCache(Type type)
         {
             var entityInfo = this.Context.EntityMaintenance.GetEntityInfoNoCache(type);
             InitMappingInfo(entityInfo);
         }
-        private EntityInfo CopyEntityInfo(EntityInfo entityInfo)
+        public EntityInfo GetEntityNoCacheInitMappingInfo(Type type)
         {
-            EntityInfo result = new EntityInfo()
-            {
-                DbTableName = entityInfo.DbTableName,
-                EntityName = entityInfo.EntityName,
-                Type = entityInfo.Type
-            };
-            List<EntityColumnInfo> columns = new List<EntityColumnInfo>();
-            if (entityInfo.Columns.HasValue())
-            {
-                foreach (var item in entityInfo.Columns)
-                {
-                    EntityColumnInfo column = new EntityColumnInfo()
-                    {
-                        ColumnDescription = item.ColumnDescription,
-                        DataType = item.DataType,
-                        DbColumnName = item.DbColumnName,
-                        DbTableName = item.DbTableName,
-                        DecimalDigits = item.DecimalDigits,
-                        DefaultValue = item.DefaultValue,
-                        EntityName = item.EntityName,
-                        IsIdentity = item.IsIdentity,
-                        IsIgnore = item.IsIgnore,
-                        IsNullable = item.IsNullable,
-                        IsOnlyIgnoreInsert = item.IsOnlyIgnoreInsert,
-                        IsPrimarykey = item.IsPrimarykey,
-                        Length = item.Length,
-                        OldDbColumnName = item.OldDbColumnName,
-                        OracleSequenceName = item.OracleSequenceName,
-                        PropertyInfo = item.PropertyInfo,
-                        PropertyName = item.PropertyName,
-                        IsArray=item.IsArray,
-                        IsJson=item.IsJson
-                    };
-                    columns.Add(item);
-                }
-            }
-            result.Columns = columns;
-            return result;
+            var entityInfo = this.Context.EntityMaintenance.GetEntityInfoNoCache(type);
+            InitMappingInfo(entityInfo);
+            return entityInfo;
         }
+        //private EntityInfo CopyEntityInfo(EntityInfo entityInfo)
+        //{
+        //    EntityInfo result = new EntityInfo()
+        //    {
+        //        DbTableName = entityInfo.DbTableName,
+        //        EntityName = entityInfo.EntityName,
+        //        Type = entityInfo.Type
+        //    };
+        //    List<EntityColumnInfo> columns = new List<EntityColumnInfo>();
+        //    if (entityInfo.Columns.HasValue())
+        //    {
+        //        foreach (var item in entityInfo.Columns)
+        //        {
+        //            EntityColumnInfo column = new EntityColumnInfo()
+        //            {
+        //                ColumnDescription = item.ColumnDescription,
+        //                DataType = item.DataType,
+        //                DbColumnName = item.DbColumnName,
+        //                DbTableName = item.DbTableName,
+        //                DecimalDigits = item.DecimalDigits,
+        //                DefaultValue = item.DefaultValue,
+        //                EntityName = item.EntityName,
+        //                IsIdentity = item.IsIdentity,
+        //                IsIgnore = item.IsIgnore,
+        //                IsNullable = item.IsNullable,
+        //                IsOnlyIgnoreInsert = item.IsOnlyIgnoreInsert,
+        //                IsPrimarykey = item.IsPrimarykey,
+        //                Length = item.Length,
+        //                OldDbColumnName = item.OldDbColumnName,
+        //                OracleSequenceName = item.OracleSequenceName,
+        //                PropertyInfo = item.PropertyInfo,
+        //                PropertyName = item.PropertyName,
+        //                IsArray=item.IsArray,
+        //                IsJson=item.IsJson
+        //            };
+        //            columns.Add(item);
+        //        }
+        //    }
+        //    result.Columns = columns;
+        //    return result;
+        //}
 
         private void InitMappingInfo(EntityInfo entityInfo)
         {
@@ -272,6 +278,10 @@ namespace SqlSugar
             result.SqlBuilder.QueryBuilder.EntityType = typeof(T);
             result.SqlBuilder.QueryBuilder.EntityName = typeof(T).Name;
             result.SqlBuilder.QueryBuilder.LambdaExpressions = InstanceFactory.GetLambdaExpressions(CurrentConnectionConfig);
+            if (StaticConfig.CompleteQueryableFunc != null)
+            {
+                StaticConfig.CompleteQueryableFunc(result);
+            }
             return result;
         }
         protected InsertableProvider<T> CreateInsertable<T>(T[] insertObjs) where T : class, new()
@@ -288,6 +298,10 @@ namespace SqlSugar
             sqlBuilder.InsertBuilder.LambdaExpressions = InstanceFactory.GetLambdaExpressions(this.CurrentConnectionConfig);
             sqlBuilder.Context = result.SqlBuilder.InsertBuilder.Context = this;
             result.Init();
+            if (StaticConfig.CompleteInsertableFunc != null) 
+            {
+                StaticConfig.CompleteInsertableFunc(result);
+            }
             return result;
         }
         protected DeleteableProvider<T> CreateDeleteable<T>() where T : class, new()
@@ -301,6 +315,10 @@ namespace SqlSugar
             sqlBuilder.DeleteBuilder.Builder = sqlBuilder;
             sqlBuilder.DeleteBuilder.LambdaExpressions = InstanceFactory.GetLambdaExpressions(this.CurrentConnectionConfig);
             sqlBuilder.Context = result.SqlBuilder.DeleteBuilder.Context = this;
+            if (StaticConfig.CompleteDeleteableFunc != null)
+            {
+                StaticConfig.CompleteDeleteableFunc(result);
+            }
             return result;
         }
         protected UpdateableProvider<T> CreateUpdateable<T>(T[] UpdateObjs) where T : class, new()
@@ -317,6 +335,10 @@ namespace SqlSugar
             sqlBuilder.UpdateBuilder.LambdaExpressions = InstanceFactory.GetLambdaExpressions(this.CurrentConnectionConfig);
             sqlBuilder.Context = result.SqlBuilder.UpdateBuilder.Context = this;
             result.Init();
+            if (StaticConfig.CompleteUpdateableFunc != null)
+            {
+                StaticConfig.CompleteUpdateableFunc(result);
+            }
             return result;
         }
 
@@ -327,12 +349,17 @@ namespace SqlSugar
             string shortName = string.Empty;
             List<SugarParameter> paramters = new List<SugarParameter>();
             queryable.SqlBuilder.QueryBuilder.JoinQueryInfos = this.GetJoinInfos(queryable.SqlBuilder, joinExpression, ref paramters, ref shortName, types);
+            if (queryable.SqlBuilder.QueryBuilder.JoinQueryInfos.Any())
+            {
+                queryable.SqlBuilder.QueryBuilder.JoinQueryInfos.Last().EntityType = types.Last();
+            }
             queryable.SqlBuilder.QueryBuilder.TableShortName = shortName;
             queryable.SqlBuilder.QueryBuilder.JoinExpression = joinExpression;
             if (paramters != null)
             {
                 queryable.SqlBuilder.QueryBuilder.Parameters.AddRange(paramters);
             }
+            UtilMethods.AddDiscrimator(typeof(T), queryable, queryable.QueryBuilder.TableShortName + ".");
         }
         protected void CreateEasyQueryJoin<T>(Expression joinExpression, Type[] types, ISugarQueryable<T> queryable)
         {
@@ -342,10 +369,47 @@ namespace SqlSugar
             queryable.SqlBuilder.QueryBuilder.EasyJoinInfos = this.GetEasyJoinInfo(joinExpression, ref shortName, queryable.SqlBuilder, types);
             queryable.SqlBuilder.QueryBuilder.TableShortName = shortName;
             queryable.SqlBuilder.QueryBuilder.JoinExpression = joinExpression;
+            var isNoPgAuto = this.Context.CurrentConnectionConfig.MoreSettings?.PgSqlIsAutoToLower == false;
+            if (isNoPgAuto) 
+                queryable.SqlBuilder.QueryBuilder.TableShortName = queryable.SqlBuilder.GetTranslationColumnName(shortName);
         }
         #endregion
 
         #region Private methods
+        private void _ThenMapper<T>(IEnumerable<T> list, Action<T> action)
+        {
+            MapperContext<T> result = new MapperContext<T>();
+            result.context = this.Context;
+            if (result.context.TempItems == null)
+            {
+                result.context.TempItems = new Dictionary<string, object>();
+            }
+            var key = "Queryable_To_Context";
+            result.context.TempItems.Add(key, result);
+            result.list = list.ToList();
+            foreach (var item in list)
+            {
+                action.Invoke(item);
+            }
+            result.context.TempItems.Remove(key);
+        }
+        private async Task _ThenMapperAsync<T>(IEnumerable<T> list, Func<T, Task> action)
+        {
+            MapperContext<T> result = new MapperContext<T>();
+            result.context = this.Context;
+            if (result.context.TempItems == null)
+            {
+                result.context.TempItems = new Dictionary<string, object>();
+            }
+            var key = "Queryable_To_Context";
+            result.context.TempItems.Add(key, result);
+            result.list = list.ToList();
+            foreach (var item in list)
+            {
+                await action.Invoke(item);
+            }
+            result.context.TempItems.Remove(key);
+        }
         internal string GetN()
         {
             var N = "N";
@@ -355,7 +419,7 @@ namespace SqlSugar
             }
             return N;
         }
-        internal bool IsVarchar()
+        public bool IsVarchar()
         {
             if (_Context.CurrentConnectionConfig.MoreSettings != null && _Context.CurrentConnectionConfig.MoreSettings.DisableNvarchar)
             {
@@ -363,7 +427,7 @@ namespace SqlSugar
             }
             return false;
         }
-        private static void CheckDbDependency(ConnectionConfig config)
+        private  void CheckDbDependency(ConnectionConfig config)
         {
             switch (config.DbType)
             {
@@ -382,7 +446,13 @@ namespace SqlSugar
                     DependencyManagement.TryPostgreSQL();
                     break;
                 case DbType.OpenGauss:
-                    Check.ExceptionEasy("Use DbType.PostgreSQL , ConnectionString add No Reset On Close=true", "OpenGausso数据库可以使用DbType.PostgreSQL 并且连接字符串加上 No Reset On Close=true");
+                    config.DbType = DbType.PostgreSQL;
+                    if (this.CurrentConnectionConfig.MoreSettings == null)
+                        this.CurrentConnectionConfig.MoreSettings = new ConnMoreSettings();
+                    this.CurrentConnectionConfig.MoreSettings.DatabaseModel = DbType.OpenGauss;
+                    break;
+                case DbType.HG:
+                    InstanceFactory.CustomDllName = SugarCompatible.IsFramework ? throw new Exception("Only.NET CORE is supported") : "SqlSugar.HGCore";
                     break;
                 case DbType.Kdbndp:
                     DependencyManagement.TryKdbndb();
@@ -395,6 +465,11 @@ namespace SqlSugar
                     break;
                 case DbType.MySqlConnector:
                     InstanceFactory.CustomDllName = SugarCompatible.IsFramework?"SqlSugar.MySqlConnector": "SqlSugar.MySqlConnectorCore";
+                    if (SugarCompatible.IsFramework.ObjToBool() == false) 
+                    {
+                        config.DbType= DbType.MySql;
+                        InstanceFactory.CustomDllName = null;
+                    }
                     break;
                 case DbType.Access:
                     InstanceFactory.CustomDllName = SugarCompatible.IsFramework?"SqlSugar.Access": "SqlSugar.AccessCore";
@@ -403,6 +478,65 @@ namespace SqlSugar
                     Check.Exception(InstanceFactory.CustomDbName.IsNullOrEmpty() , "DbType.Custom: InstanceFactory.CustomDbName is not null  ");
                     Check.Exception(InstanceFactory.CustomNamespace.IsNullOrEmpty(), "DbType.Custom: InstanceFactory.CustomNamespace is not null  ");
                     Check.Exception(InstanceFactory.CustomDllName.IsNullOrEmpty(), "DbType.Custom: InstanceFactory.CustomDllName is not null  ");
+                    break;
+                case DbType.QuestDB:
+                    DependencyManagement.TryPostgreSQL();
+                    break;
+                case DbType.ClickHouse:
+                    Check.Exception(SugarCompatible.IsFramework, "ClickHouse only support .net core");
+                    InstanceFactory.CustomDllName = SugarCompatible.IsFramework ? "SqlSugar.ClickHouse" : "SqlSugar.ClickHouseCore";
+                    break;
+                case DbType.GBase:
+                    Check.Exception(SugarCompatible.IsFramework, "GBase only support .net core");
+                    InstanceFactory.CustomDllName = SugarCompatible.IsFramework ? "SqlSugar.GBase" : "SqlSugar.GBaseCore";
+                    break;
+                case DbType.Odbc:
+                    InstanceFactory.CustomDllName = SugarCompatible.IsFramework ? "SqlSugar.Odbc" : "SqlSugar.OdbcCore";
+                    break;
+                case DbType.OceanBaseForOracle:
+                    Check.Exception(SugarCompatible.IsFramework, "OceanBaseForOracle only support .net core");
+                    InstanceFactory.CustomDllName = SugarCompatible.IsFramework ? "SqlSugar.OceanBaseForOracle" : "SqlSugar.OceanBaseForOracleCore";
+                    break;
+                case DbType.GaussDB:
+                    config.DbType = DbType.PostgreSQL;
+                    if (this.CurrentConnectionConfig.MoreSettings == null)
+                        this.CurrentConnectionConfig.MoreSettings = new ConnMoreSettings();
+                    this.CurrentConnectionConfig.MoreSettings.DatabaseModel = DbType.GaussDB;
+                    break;
+                case DbType.Vastbase:
+                    config.DbType = DbType.PostgreSQL;
+                    if (this.CurrentConnectionConfig.MoreSettings==null) 
+                        this.CurrentConnectionConfig.MoreSettings = new ConnMoreSettings();
+                    this.CurrentConnectionConfig.MoreSettings.DatabaseModel = DbType.Vastbase;
+                    break;
+                case DbType.OceanBase:
+                    config.DbType = DbType.MySql; 
+                    break;
+                case DbType.Tidb:
+                    config.DbType = DbType.MySql;
+                    break;
+                case DbType.PolarDB:
+                    config.DbType = DbType.MySql;
+                    break;
+                case DbType.Doris:
+                    config.DbType = DbType.MySql;
+                    if (this.CurrentConnectionConfig.MoreSettings == null)
+                        this.CurrentConnectionConfig.MoreSettings = new ConnMoreSettings();
+                    this.CurrentConnectionConfig.MoreSettings.DatabaseModel = DbType.Doris;
+                    this.CurrentConnectionConfig.MoreSettings.DisableNvarchar = true;
+                    break;
+                case DbType.TDengine:
+                    Check.Exception(SugarCompatible.IsFramework, "TDengine only support .net core");
+                    InstanceFactory.CustomDllName = SugarCompatible.IsFramework ? "SqlSugar.TDengine" : "SqlSugar.TDengineCore";
+                    break;
+                case DbType.Xugu:
+                    Check.Exception(SugarCompatible.IsFramework, "Xugu only support .net core");
+                    //InstanceFactory.CustomDbName = "Xugu"; 
+                    InstanceFactory.CustomDllName = "SqlSugar.XuguCore"; 
+                    //InstanceFactory.CustomNamespace = "SqlSugar.Xugu"; 
+                    break;
+                case DbType.GoldenDB:
+                    config.DbType = DbType.MySql;
                     break;
                 default:
                     throw new Exception("ConnectionConfig.DbType is null");
@@ -416,6 +550,7 @@ namespace SqlSugar
             expressionContext.MappingColumns = this.MappingColumns;
             expressionContext.MappingTables = this.MappingTables;
             expressionContext.IsSingle = false;
+            expressionContext.SugarContext = new ExpressionOutParameter() { Context=this.Context };
             if (this.Context.CurrentConnectionConfig.MoreSettings != null)
             {
                 expressionContext.PgSqlIsAutoToLower = this.Context.CurrentConnectionConfig.MoreSettings.PgSqlIsAutoToLower;
@@ -446,17 +581,23 @@ namespace SqlSugar
                 {
                     joinInfo.TableName = entityType.Name;
                 }
+                var isNoPgAuto = this.Context.CurrentConnectionConfig.MoreSettings?.PgSqlIsAutoToLower == false;
                 if (isFirst)
                 {
                     var firstItem = lambdaParameters.First();
                     lambdaParameters.Remove(firstItem);
                     shortName = firstItem.Name;
+                    if (isNoPgAuto) 
+                        shortName = sqlBuilder.GetTranslationColumnName(shortName);
                 }
                 var joinString = joinArray[i * 2 - 2];
                 joinInfo.ShortName = lambdaParameters[i - 1].Name;
                 joinInfo.JoinType = (JoinType)Enum.Parse(typeof(JoinType), joinString);
                 joinInfo.JoinWhere = joinArray[i * 2 - 1];
                 joinInfo.JoinIndex = i;
+                joinInfo.EntityType = entityType;
+                if (isNoPgAuto)
+                    joinInfo.ShortName = sqlBuilder.GetTranslationColumnName(joinInfo.ShortName);
                 result.Add((joinInfo));
             }
             expressionContext.Clear();
@@ -473,7 +614,7 @@ namespace SqlSugar
             {
                 ++i;
                 var isLast = joinArray.Length == i;
-                var isJoinType = item.IsIn(JoinType.Full.ToString(),JoinType.Inner.ToString(), JoinType.Left.ToString(), JoinType.Right.ToString());
+                var isJoinType = item.IsIn(JoinType.Full.ToString(),JoinType.Inner.ToString(), JoinType.Left.ToString(), JoinType.Right.ToString(),JoinType.Cross.ToString());
                 if (isJoinType)
                 {
                     if (joinValue != null)
@@ -499,10 +640,18 @@ namespace SqlSugar
             Dictionary<string, string> result = new Dictionary<string, string>();
             var lambdaParameters = ((LambdaExpression)joinExpression).Parameters.ToList();
             shortName = lambdaParameters.First().Name;
+            var isNoPgAuto = this.Context.CurrentConnectionConfig.MoreSettings?.PgSqlIsAutoToLower == false;
             var index = 1;
             foreach (var item in entityTypeArray)
             {
-                result.Add(UtilConstants.Space + lambdaParameters[index].Name, item.Name);
+                if (isNoPgAuto)
+                {
+                    result.Add(UtilConstants.Space +builder.GetTranslationColumnName(lambdaParameters[index].Name), item.Name);
+                }
+                else
+                {
+                    result.Add(UtilConstants.Space + lambdaParameters[index].Name, item.Name);
+                }
                 ++index;
             }
             return result;

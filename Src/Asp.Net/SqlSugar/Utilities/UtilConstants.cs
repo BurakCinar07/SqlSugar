@@ -12,7 +12,7 @@ namespace SqlSugar
         internal const string Space = " ";
         internal const char SpaceChar =' ';
         internal const string AssemblyName = "SqlSugar";
-        internal const string ReplaceKey = "{662E689B-17A1-4D06-9D27-F29EAB8BC3D6}";
+        internal static string ReplaceKey = "{"+Guid.NewGuid()+"}";
         internal const string ReplaceCommaKey = "{112A689B-17A1-4A06-9D27-A39EAB8BC3D5}";
 
         internal static Type UShortType = typeof(ushort);
@@ -24,6 +24,7 @@ namespace SqlSugar
         internal static Type BoolType = typeof(bool);
         internal static Type BoolTypeNull = typeof(bool?);
         internal static Type ByteType = typeof(Byte);
+        internal static Type SByteType = typeof(sbyte);
         internal static Type ObjType = typeof(object);
         internal static Type DobType = typeof(double);
         internal static Type FloatType = typeof(float);
@@ -44,6 +45,8 @@ namespace SqlSugar
         internal static Type DicSo = typeof(KeyValuePair<string, object>);
         internal static Type DicArraySS = typeof(Dictionary<string, string>);
         internal static Type DicArraySO = typeof(Dictionary<string, object>);
+
+        public static Type SqlConvertType = typeof(SqlSugar.DbConvert.NoParameterCommonPropertyConvert);
 
         public static Type SugarType = typeof(SqlSugarProvider);
 

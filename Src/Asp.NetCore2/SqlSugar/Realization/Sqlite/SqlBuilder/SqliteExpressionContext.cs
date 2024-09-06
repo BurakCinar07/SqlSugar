@@ -4,6 +4,10 @@ namespace SqlSugar
 {
     public class SqliteExpressionContext : ExpressionContext, ILambdaExpressions
     {
+        public override ExpressionContextCase Case { get; set; } = new ExpressionContextCase()
+        {
+            IsDateString = true,
+        };
         public SqlSugarProvider Context { get; set; }
         public SqliteExpressionContext()
         {
@@ -14,6 +18,39 @@ namespace SqlSugar
     }
     public class SqliteMethod : DefaultDbMethod, IDbMethods
     {
+        public override string WeekOfYear(MethodCallExpressionModel mode)
+        {
+            var parameterNameA = mode.Args[0].MemberName;
+            return $"STRFTIME('%W', {parameterNameA})+1 ";
+        }
+        public override string Equals(MethodCallExpressionModel model)
+        {
+            var result = base.Equals(model);
+            if (model.Args.Count == 3 && result.Trim().Last() == ')')
+            {
+                result = (" " + result.Trim().TrimEnd(')') + " COLLATE NOCASE )  ");
+            }
+            return result;
+        }
+        public override string JsonIndex(MethodCallExpressionModel model)
+        {
+            var parameter = model.Args[0];
+            var parameter1 = model.Args[1];
+            return $"json_extract({parameter.MemberName}, '$[{parameter1.MemberValue}]')";
+        }
+        public override string JsonField(MethodCallExpressionModel model)
+        {
+            var hasPrefix = model.Args[1].MemberValue is string v ? v[0] == '$' : false;
+            model.Parameters.RemoveAll(item => item.ParameterName == model.Args[1].MemberName + "");
+            return string.Format("json_extract({0},'{1}{2}')", 
+                model.Args[0].MemberName, 
+                hasPrefix ? string.Empty : string.Intern("$."), 
+                model.Args[1].MemberValue);
+        }
+        public override string GetStringJoinSelector(string result, string separator)
+        {
+            return $"group_concat({result},'{separator}') ";
+        }
         public override string DateDiff(MethodCallExpressionModel model)
         {
             var parameter = (DateType)(Enum.Parse(typeof(DateType), model.Args[0].MemberValue.ObjToString()));
@@ -191,7 +228,7 @@ namespace SqlSugar
                     Check.ThrowNotSupportedException(typeName);
                     break;
             }
-            return string.Format(" CAST(STRFTIME('{1}', DATETIME(DATETIME({0}), 'LOCALTIME')) AS INTEGER)", parameter.MemberName, parameter2);
+            return string.Format(" CAST(STRFTIME('{1}',  DATETIME({0}) ) AS INTEGER)", parameter.MemberName, parameter2);
         }
 
         public override string DateIsSameDay(MethodCallExpressionModel model)
@@ -236,7 +273,7 @@ namespace SqlSugar
 
         public override string MergeString(params string[] strings)
         {
-            return  string.Join("||", strings).Replace("+","");
+            return string.Join("||", strings).Replace("+", "");
         }
 
         public override string IsNull(MethodCallExpressionModel model)
@@ -248,7 +285,7 @@ namespace SqlSugar
 
         public override string GetDate()
         {
-            return "DATETIME('now')";
+            return "DATETIME('now', 'localtime')";
         }
 
         public override string GetRandom()
@@ -258,7 +295,50 @@ namespace SqlSugar
 
         public override string CharIndex(MethodCallExpressionModel model)
         {
-            throw new NotSupportedException("Slqite Not Supported CharIndex");
+            var parameterNameA = model.Args[0].MemberName;
+            var parameterNameB = model.Args[1].MemberName;
+            return $" INSTR(LOWER({parameterNameA}), LOWER({parameterNameB})) ";
+        }
+
+        public override string TrimEnd(MethodCallExpressionModel mode)
+        {
+            var parameterNameA = mode.Args[0].MemberName;
+            var parameterNameB = mode.Args[1].MemberName;
+            return $"  CASE WHEN SUBSTR({parameterNameA}, -1) = {parameterNameB} THEN SUBSTR({parameterNameA}, 1, LENGTH({parameterNameA}) - 1) ELSE {parameterNameA} END ";
+        }
+        public override string TrimStart(MethodCallExpressionModel mode)
+        {
+
+            var parameterNameA = mode.Args[0].MemberName;
+            var parameterNameB = mode.Args[1].MemberName;
+            return $"  CASE WHEN SUBSTR({parameterNameA}, 1, 1) ={parameterNameB} THEN SUBSTR({parameterNameA}, 2) ELSE {parameterNameA} END ";
+        }
+
+        public override string PadLeft(MethodCallExpressionModel mode)
+        {
+            var parameterNameA = mode.Args[0].MemberName;
+            var parameterNameB = mode.Args[1].MemberName;
+            var parameterNameC = mode.Args[2].MemberName;
+            var value = new string[mode.Args[1].MemberValue.ObjToInt()].Select(it => parameterNameC);
+            return $"substr({string.Join("||", value)} || {parameterNameA}, {parameterNameB}*-1)  ";
+        }
+
+        public override string Left(MethodCallExpressionModel mode)
+        {
+            var parameterNameA = mode.Args[0].MemberName;
+            var parameterNameB = mode.Args[1].MemberName;
+            return $" SUBSTR({parameterNameA}, 1, {parameterNameB})  ";
+        }
+        public override string Right(MethodCallExpressionModel mode)
+        {
+            var parameterNameA = mode.Args[0].MemberName;
+            var parameterNameB = mode.Args[1].MemberName;
+            return $" SUBSTR({parameterNameA}, -2, {parameterNameB})  ";
+        }
+
+        public override string NewUid(MethodCallExpressionModel mode)
+        {
+            return " substr(upper(hex(randomblob(4))), 1, 8) || '-' ||\r\n    substr(upper(hex(randomblob(2))), 1, 4) || '-' ||\r\n    '4' || substr(upper(hex(randomblob(2))), 2, 3) || '-' ||\r\n    substr('89ab', 1 + (abs(random()) % 4), 1) || substr(upper(hex(randomblob(2))), 2, 3) || '-' ||\r\n    substr(upper(hex(randomblob(6))), 1, 12) ";
         }
     }
 }

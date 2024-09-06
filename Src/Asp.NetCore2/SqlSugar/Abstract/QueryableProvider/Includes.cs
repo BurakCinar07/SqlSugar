@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -9,8 +11,231 @@ namespace SqlSugar
 {
     public partial class QueryableProvider<T> : QueryableAccessory, ISugarQueryable<T>
     {
-        public ISugarQueryable<T> Includes<TReturn1>(Expression<Func<T, List<TReturn1>>> include1) { _Includes<T, TReturn1>(this.Context, include1); return this; }
-        public ISugarQueryable<T> Includes<TReturn1>(Expression<Func<T, TReturn1>> include1) { _Includes<T, TReturn1>(this.Context, include1); return this; }
+        public ISugarQueryable<T> IncludesByExpression2<TReturn1, TReturn2>(Expression include1, Expression include2) 
+        {
+            _Includes<T, TReturn1,TReturn2>(this.Context, include1,include2);
+            return this;
+        }
+        public ISugarQueryable<T> IncludesByExpression3<TReturn1, TReturn2, TReturn3>(Expression include1, Expression include2, Expression include3)
+        {
+            _Includes<T, TReturn1, TReturn2, TReturn3>(this.Context, include1, include2, include3);
+            return this;
+        }
+        public ISugarQueryable<T> IncludesByExpression4<TReturn1, TReturn2, TReturn3, TReturn4>(Expression include1, Expression include2, Expression include3, Expression include4)
+        {
+            _Includes<T, TReturn1, TReturn2, TReturn3, TReturn4>(this.Context, include1, include2, include3, include4);
+            return this;
+        }
+        public ISugarQueryable<T> IncludesByExpression5<TReturn1, TReturn2, TReturn3, TReturn4, TReturn5>(Expression include1, Expression include2, Expression include3, Expression include4, Expression include5)
+        {
+            _Includes<T, TReturn1, TReturn2, TReturn3, TReturn4, TReturn5>(this.Context, include1, include2, include3, include4, include5);
+            return this;
+        }
+        public ISugarQueryable<T> IncludesByExpression<TReturn1>(Expression include1)
+        {
+            _Includes<T, TReturn1>(this.Context, include1);
+            return this;
+        }
+        public ISugarQueryable<T> IncludesByNameString(string navMemberName, string thenNavMemberName2)
+        {
+            var method = this.GetType().GetMethods().Where(it => it.Name == "IncludesByExpression2")
+            .First();
+            List<Expression> parametres = new List<Expression>();
+            List<Type> types = new List<Type>();
+            var entityInfo = this.EntityInfo;
+            method = GetIncludesByNameStringMethod(types,navMemberName, method, parametres, entityInfo);
+            //var navFirst = GetNavColumnInfo(navMemberName, entityInfo);
+            var entityInfo2 = this.Context.EntityMaintenance.GetEntityInfo(types.Last());
+            method = GetIncludesByNameStringMethod(types,thenNavMemberName2, method, parametres, entityInfo2);
+            method.MakeGenericMethod(types.ToArray()).Invoke(this, parametres.Cast<object>().ToArray());
+            return this;
+        }
+        public ISugarQueryable<T> IncludesByNameString(string navMemberName, string thenNavMemberName2,string thenNavMemberName3)
+        {
+            var method = this.GetType().GetMethods().Where(it => it.Name == "IncludesByExpression3")
+            .First();
+            List<Expression> parametres = new List<Expression>();
+            List<Type> types = new List<Type>();
+            var entityInfo = this.EntityInfo;
+            method = GetIncludesByNameStringMethod(types, navMemberName, method, parametres, entityInfo);
+            //var navFirst = GetNavColumnInfo(navMemberName, entityInfo);
+            var entityInfo2 = this.Context.EntityMaintenance.GetEntityInfo(types.Last());
+            method = GetIncludesByNameStringMethod(types, thenNavMemberName2, method, parametres, entityInfo2);
+            var entityInfo3 = this.Context.EntityMaintenance.GetEntityInfo(types.Last());
+            method = GetIncludesByNameStringMethod(types, thenNavMemberName3, method, parametres, entityInfo3);
+            method.MakeGenericMethod(types.ToArray()).Invoke(this, parametres.Cast<object>().ToArray());
+            return this;
+        }
+        public ISugarQueryable<T> IncludesByNameString(string navMemberName, string thenNavMemberName2, string thenNavMemberName3, string thenNavMemberName4) 
+        {
+            var method = this.GetType().GetMethods().Where(it => it.Name == "IncludesByExpression4")
+            .First();
+            List<Expression> parametres = new List<Expression>();
+            List<Type> types = new List<Type>();
+            var entityInfo = this.EntityInfo;
+            method = GetIncludesByNameStringMethod(types, navMemberName, method, parametres, entityInfo);
+            //var navFirst = GetNavColumnInfo(navMemberName, entityInfo);
+            var entityInfo2 = this.Context.EntityMaintenance.GetEntityInfo(types.Last());
+            method = GetIncludesByNameStringMethod(types, thenNavMemberName2, method, parametres, entityInfo2);
+            var entityInfo3 = this.Context.EntityMaintenance.GetEntityInfo(types.Last());
+            method = GetIncludesByNameStringMethod(types, thenNavMemberName3, method, parametres, entityInfo3);
+            var entityInfo4 = this.Context.EntityMaintenance.GetEntityInfo(types.Last());
+            method = GetIncludesByNameStringMethod(types, thenNavMemberName4, method, parametres, entityInfo4);
+            method.MakeGenericMethod(types.ToArray()).Invoke(this, parametres.Cast<object>().ToArray());
+            return this;
+        }
+        public ISugarQueryable<T> IncludesByNameString(string navMemberName, string thenNavMemberName2, string thenNavMemberName3, string thenNavMemberName4, string thenNavMemberName5) 
+        {
+            var method = this.GetType().GetMethods().Where(it => it.Name == "IncludesByExpression5")
+        .First();
+            List<Expression> parametres = new List<Expression>();
+            List<Type> types = new List<Type>();
+            var entityInfo = this.EntityInfo;
+            method = GetIncludesByNameStringMethod(types, navMemberName, method, parametres, entityInfo);
+            //var navFirst = GetNavColumnInfo(navMemberName, entityInfo);
+            var entityInfo2 = this.Context.EntityMaintenance.GetEntityInfo(types.Last());
+            method = GetIncludesByNameStringMethod(types, thenNavMemberName2, method, parametres, entityInfo2);
+            var entityInfo3 = this.Context.EntityMaintenance.GetEntityInfo(types.Last());
+            method = GetIncludesByNameStringMethod(types, thenNavMemberName3, method, parametres, entityInfo3);
+            var entityInfo4 = this.Context.EntityMaintenance.GetEntityInfo(types.Last());
+            method = GetIncludesByNameStringMethod(types, thenNavMemberName4, method, parametres, entityInfo4);
+            var entityInfo5 = this.Context.EntityMaintenance.GetEntityInfo(types.Last());
+            method = GetIncludesByNameStringMethod(types, thenNavMemberName5, method, parametres, entityInfo5);
+            method.MakeGenericMethod(types.ToArray()).Invoke(this, parametres.Cast<object>().ToArray());
+            return this;
+        }
+        private static MethodInfo GetIncludesByNameStringMethod(List<Type> types,string navMemberName, MethodInfo method, List<Expression> parametres, EntityInfo entityInfo)
+        {
+            var navFirst = GetNavColumnInfo(navMemberName, entityInfo);
+            parametres.AddRange(GetIncludesByNameStringParameters(entityInfo.Type, navFirst));
+            if (navFirst.PropertyInfo.PropertyType.FullName.IsCollectionsList())
+            {
+                types.Add(navFirst.PropertyInfo.PropertyType.GetGenericArguments()[0]);
+            }
+            else
+            {
+                types.Add(navFirst.PropertyInfo.PropertyType);
+            }
+            return method;
+        }
+
+        private static EntityColumnInfo GetNavColumnInfo(string navMemberName, EntityInfo entityInfo)
+        {
+            return entityInfo.Columns.Where(it => it.Navigat != null && it.PropertyName.EqualCase(navMemberName)).FirstOrDefault();
+        }
+
+        private static List<Expression> GetIncludesByNameStringParameters(Type type,EntityColumnInfo item)
+        {
+            var parametres = new List<Expression> { };
+            Check.ExceptionEasy(item == null, "\r\nThe \"IncludesByNameString\" method encountered an error. The navigation object does not exist. Please check the parameters and navigation configuration.", "IncludesByNameString方法出错，导航对象不存在，请检查参数和导航配置");
+            var properyType = item.PropertyInfo.PropertyType;
+            var properyItemType = properyType;
+            if (properyType.FullName.IsCollectionsList())
+            {
+                properyItemType = properyType.GetGenericArguments()[0];
+            }
+            var exp = ExpressionBuilderHelper.CreateExpressionSelectField(type, item.PropertyName, properyType);
+            parametres.Add(exp);
+            return parametres;
+        }
+
+        public ISugarQueryable<T> IncludesByNameString(string navMemberName) 
+        {
+            var navs = this.EntityInfo.Columns.Where(it => it.Navigat != null&&it.PropertyName.EqualCase(navMemberName)).ToList();
+            foreach (var item in navs)
+            {
+                var properyType = item.PropertyInfo.PropertyType;
+                var properyItemType = properyType;
+                if (properyType.FullName.IsCollectionsList())
+                {
+                    properyItemType = properyType.GetGenericArguments()[0];
+                }
+                var exp = ExpressionBuilderHelper.CreateExpressionSelectField(typeof(T), item.PropertyName, properyType);
+                var method = this.GetType().GetMethods().Where(it => it.Name == "IncludesByExpression")
+                    .First()
+                    .MakeGenericMethod(properyItemType);
+                method.Invoke(this, new object[] { exp });
+            }
+            return this;
+        }
+        public ISugarQueryable<T> IncludesAllFirstLayer(params string[] ignoreProperyNameList) 
+        {
+            var navs=this.EntityInfo.Columns.Where(it => it.Navigat != null).ToList();
+            foreach (var item in navs)
+            {
+                if (ignoreProperyNameList != null && ignoreProperyNameList.Any(z=>z.EqualCase(item.PropertyName)))
+                {
+                    //future
+                }
+                else
+                {
+                    var properyType = item.PropertyInfo.PropertyType;
+                    var properyItemType = properyType;
+                    if (properyType.FullName.IsCollectionsList())
+                    {
+                        properyItemType = properyType.GetGenericArguments()[0];
+                    }
+                    var exp = ExpressionBuilderHelper.CreateExpressionSelectField(typeof(T), item.PropertyName, properyType);
+                    var method = this.GetType().GetMethods().Where(it => it.Name == "IncludesByExpression")
+                        .First()
+                        .MakeGenericMethod(properyItemType);
+                    method.Invoke(this, new object[] { exp });
+                }
+            }
+            return this;
+        }
+        public ISugarQueryable<T> IncludesAllSecondLayer<TReturn1>(Expression<Func<T, TReturn1>> expression, params string[] ignoreProperyNameList) 
+        {
+            this.Includes(expression);
+            var type = typeof(TReturn1);
+            if (type.FullName.IsCollectionsList()) 
+            {
+                type = type.GetGenericArguments()[0];
+            }
+            var navs = this.Context.EntityMaintenance.GetEntityInfo(type).Columns.Where(it => it.Navigat != null).ToList();
+            foreach (var item in navs)
+            {
+                if (ignoreProperyNameList != null && ignoreProperyNameList.Any(z => z.EqualCase(item.PropertyName)))
+                {
+                    //future
+                }
+                else
+                {
+                    var properyType = item.PropertyInfo.PropertyType;
+                    var properyItemType = properyType;
+                    if (properyType.FullName.IsCollectionsList())
+                    {
+                        properyItemType = properyType.GetGenericArguments()[0];
+                    }
+                    var exp = ExpressionBuilderHelper.CreateExpressionSelectField(type, item.PropertyName, properyType);
+                    var method = this.GetType().GetMethods().Where(it => it.Name == "IncludesByExpression2")
+                        .First()
+                        .MakeGenericMethod(type, properyItemType);
+                    method.Invoke(this, new object[] { expression, exp });
+                }
+            }
+            return this;
+        }
+        public ISugarQueryable<T> Includes<TReturn1>(Expression<Func<T, List<TReturn1>>> include1)
+        {
+            var result = GetManyQueryable(include1);
+            if (result != null)
+            {
+                return result;
+            }
+            _Includes<T, TReturn1>(this.Context, include1); 
+            return this;
+        }
+        public ISugarQueryable<T> Includes<TReturn1>(Expression<Func<T, TReturn1>> include1)
+        {
+            var result=GetManyQueryable(include1);
+            if (result != null) 
+            {
+                return result;
+            }
+            _Includes<T, TReturn1>(this.Context, include1);
+            return this;
+        } 
         public ISugarQueryable<T> Includes<TReturn1, TReturn2>(Expression<Func<T, TReturn1>> include1, Expression<Func<TReturn1, List<TReturn2>>> include2) { _Includes<T, TReturn1, TReturn2>(this.Context, include1, include2); return this; }
         public ISugarQueryable<T> Includes<TReturn1, TReturn2>(Expression<Func<T, TReturn1>> include1, Expression<Func<TReturn1, TReturn2>> include2) { _Includes<T, TReturn1, TReturn2>(this.Context, include1, include2); return this; }
         public ISugarQueryable<T> Includes<TReturn1, TReturn2>(Expression<Func<T, List<TReturn1>>> include1, Expression<Func<TReturn1, List<TReturn2>>> include2) { _Includes<T, TReturn1, TReturn2>(this.Context, include1, include2); return this; }

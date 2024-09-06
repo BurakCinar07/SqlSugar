@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Dynamic;
 using System.Linq.Expressions;
+using System.Reflection;
 using System.Threading.Tasks;
 
 namespace SqlSugar
@@ -34,6 +35,7 @@ namespace SqlSugar
         SugarActionType SugarActionType { get; set; }
 
         #region Deleteable
+        DeleteMethodInfo DeleteableByObject(object singleEntityObjectOrListObject);
         IDeleteable<T> Deleteable<T>() where T : class, new();
         IDeleteable<T> Deleteable<T>(dynamic primaryKeyValue) where T : class, new();
         IDeleteable<T> Deleteable<T>(dynamic[] primaryKeyValues) where T : class, new();
@@ -44,14 +46,22 @@ namespace SqlSugar
         #endregion
 
         #region Other methods
+        Task<SugarAsyncLock> AsyncLock(int timeOutSeconds = 30);
+        DynamicBuilder DynamicBuilder();
+        void ClearTracking();
+        void Tracking<T>(T  data) where T : class, new();
+        void Tracking<T>(List<T> data) where T : class, new();
+        SqlSugarClient CopyNew();
         T CreateContext<T>(bool isTran=true) where T : SugarUnitOfWork, new();
         SugarUnitOfWork CreateContext(bool isTran = true);
+        SplitTableContext SplitHelper(Type entityType);
         SplitTableContext SplitHelper<T>() where T : class, new();
         SplitTableContextResult<T> SplitHelper<T>(T data) where T : class, new();
         SplitTableContextResult<T> SplitHelper<T>(List<T> data) where T : class, new();
         DateTime GetDate();
         //SimpleClient GetSimpleClient();
         SimpleClient<T> GetSimpleClient<T>() where T : class, new();
+        RepositoryType GetRepository<RepositoryType>() where RepositoryType : ISugarRepository, new();
         void InitMappingInfo(Type type);
         void InitMappingInfo<T>();
         void Open();
@@ -65,9 +75,13 @@ namespace SqlSugar
         IInsertable<T> Insertable<T>(List<T> insertObjs) where T : class, new();
         IInsertable<T> Insertable<T>(T insertObj) where T : class, new();
         IInsertable<T> Insertable<T>(T[] insertObjs) where T : class, new();
+        InsertMethodInfo InsertableByObject(object singleEntityObjectOrListObject);
+        IInsertable<Dictionary<string, object>> InsertableByDynamic(object insertDynamicObject);
         #endregion
 
         #region Queryable
+        QueryMethodInfo QueryableByObject(Type entityType, string shortName);
+        QueryMethodInfo QueryableByObject(Type entityType);
         ISugarQueryable<T> MasterQueryable<T>();
         ISugarQueryable<T> SlaveQueryable<T>();
         ISugarQueryable<T> SqlQueryable<T>(string sql) where T : class, new();
@@ -128,11 +142,18 @@ namespace SqlSugar
              where T3 : class, new()
              where T4 : class, new();
         ISugarQueryable<T> Queryable<T>();
-        ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable) where T : class, new();
+        ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable);
+        ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable,string shortName);
         ISugarQueryable<T> Queryable<T>(string shortName);
         #endregion
 
         #region Saveable
+        GridSaveProvider<T> GridSave<T>(List<T> saveList) where T : class, new();
+        GridSaveProvider<T> GridSave<T>(List<T> oldList,List<T> saveList) where T : class, new();
+        IStorageable<T> Storageable<T>(T[] dataList) where T : class, new();
+        IStorageable<T> Storageable<T>(IList<T> dataList) where T : class, new();
+         StorageableDataTable Storageable(List<Dictionary<string, object>> dictionaryList, string tableName);
+         StorageableDataTable Storageable(Dictionary<string, object> dictionary, string tableName);
         IStorageable<T> Storageable<T>(List<T> dataList) where T : class, new();
         IStorageable<T> Storageable<T>(T data) where T : class, new();
         StorageableDataTable Storageable(DataTable data);
@@ -140,6 +161,9 @@ namespace SqlSugar
         ISaveable<T> Saveable<T>(List<T> saveObjects) where T : class, new();
         [Obsolete("use Storageable")]
         ISaveable<T> Saveable<T>(T saveObject) where T : class, new();
+
+        StorageableMethodInfo StorageableByObject(object singleEntityObjectOrListObject);
+
         #endregion
 
         #region Queue
@@ -166,13 +190,15 @@ namespace SqlSugar
         #endregion
 
         #region Union 
-        ISugarQueryable<T> Union<T>(List<ISugarQueryable<T>> queryables) where T : class, new();
-        ISugarQueryable<T> Union<T>(params ISugarQueryable<T>[] queryables) where T : class, new();
-        ISugarQueryable<T> UnionAll<T>(List<ISugarQueryable<T>> queryables) where T : class, new();
-        ISugarQueryable<T> UnionAll<T>(params ISugarQueryable<T>[] queryables) where T : class, new();
+        ISugarQueryable<T> Union<T>(List<ISugarQueryable<T>> queryables) where T : class;
+        ISugarQueryable<T> Union<T>(params ISugarQueryable<T>[] queryables) where T : class;
+        ISugarQueryable<T> UnionAll<T>(List<ISugarQueryable<T>> queryables) where T : class;
+        ISugarQueryable<T> UnionAll<T>(params ISugarQueryable<T>[] queryables) where T : class;
         #endregion
 
         #region Updateable
+        UpdateMethodInfo UpdateableByObject(object singleEntityObjectOrListObject);
+        UpdateExpressionMethodInfo UpdateableByObject(Type entityType);
         IUpdateable<T> Updateable<T>() where T : class, new();
         IUpdateable<T> Updateable<T>(Dictionary<string, object> columnDictionary) where T : class, new();
         IUpdateable<T> Updateable<T>(dynamic updateDynamicObject) where T : class, new();
@@ -181,6 +207,7 @@ namespace SqlSugar
         IUpdateable<T> Updateable<T>(List<T> UpdateObjs) where T : class, new();
         IUpdateable<T> Updateable<T>(T UpdateObj) where T : class, new();
         IUpdateable<T> Updateable<T>(T[] UpdateObjs) where T : class, new();
+        IUpdateable<Dictionary<string, object>> UpdateableByDynamic(object updateDynamicObject);
         #endregion
 
         #region Reportable
@@ -200,6 +227,23 @@ namespace SqlSugar
         #region ThenMapper
         void ThenMapper<T>(IEnumerable<T> list, Action<T> action);
         Task ThenMapperAsync<T>(IEnumerable<T> list, Func<T,Task> action);
+        #endregion
+
+        #region  Nav CUD
+        InsertNavTaskInit<T, T> InsertNav<T>(T data) where T : class, new();
+        InsertNavTaskInit<T, T> InsertNav<T>(List<T> datas) where T : class, new();
+        InsertNavTaskInit<T, T> InsertNav<T>(T data,InsertNavRootOptions rootOptions) where T : class, new();
+        InsertNavTaskInit<T, T> InsertNav<T>(List<T> datas, InsertNavRootOptions rootOptions) where T : class, new();
+        DeleteNavTaskInit<T, T> DeleteNav<T>(T data) where T : class, new();
+        DeleteNavTaskInit<T, T> DeleteNav<T>(List<T> datas) where T : class, new();
+        DeleteNavTaskInit<T, T> DeleteNav<T>(Expression<Func<T,bool>> whereExpression) where T : class, new();
+        DeleteNavTaskInit<T, T> DeleteNav<T>(T data, DeleteNavRootOptions options) where T : class, new();
+        DeleteNavTaskInit<T, T> DeleteNav<T>(List<T> datas, DeleteNavRootOptions options) where T : class, new();
+        DeleteNavTaskInit<T, T> DeleteNav<T>(Expression<Func<T, bool>> whereExpression, DeleteNavRootOptions options) where T : class, new();
+        UpdateNavTaskInit<T, T> UpdateNav<T>(T data) where T : class, new ();
+        UpdateNavTaskInit<T, T> UpdateNav<T>(List<T> datas) where T : class, new ();
+        UpdateNavTaskInit<T, T> UpdateNav<T>(T data,UpdateNavRootOptions rootOptions) where T : class, new();
+        UpdateNavTaskInit<T, T> UpdateNav<T>(List<T> datas, UpdateNavRootOptions rootOptions) where T : class, new();
         #endregion
 
     }

@@ -31,6 +31,12 @@ namespace SqlSugar
         public Dictionary<string, int> OracleSeqInfoList { get; set; }
         public bool IsBlukCopy { get; set; }
         public virtual bool IsOleDb { get; set; }
+        public virtual Func<string, string, string> ConvertInsertReturnIdFunc { get; set; }
+        public virtual bool IsNoPage { get; set; }
+
+        public virtual bool IsReturnPkList { get; set; }
+        public string AsName { get; set; }
+        public bool IsOffIdentity { get;  set; }
         #endregion
 
         #region SqlTemplate
@@ -111,6 +117,10 @@ namespace SqlSugar
         {
             get
             {
+                if (AsName.HasValue()) 
+                {
+                    return Builder.GetTranslationTableName(AsName);
+                }
                 var result = Builder.GetTranslationTableName(EntityInfo.EntityName);
                 result += UtilConstants.Space;
                 if (this.TableWithString.HasValue())
@@ -120,6 +130,11 @@ namespace SqlSugar
                 return result;
             }
         }
+
+        public bool MySqlIgnore { get; internal set; }
+        public bool IsWithAttr { get; internal set; }
+        public string[] ConflictNothing { get;  set; }
+
         public virtual ExpressionResult GetExpressionValue(Expression expression, ResolveExpressType resolveType)
         {
             ILambdaExpressions resolveExpress = this.LambdaExpressions;
@@ -153,7 +168,7 @@ namespace SqlSugar
             string columnsString = string.Join(",", groupList.First().Select(it => Builder.GetTranslationColumnName(it.DbColumnName)));
             if (isSingle)
             {
-                string columnParametersString = string.Join(",", this.DbColumnInfoList.Select(it => Builder.SqlParameterKeyWord + it.DbColumnName));
+                string columnParametersString = string.Join(",", this.DbColumnInfoList.Select(it =>this.GetDbColumn(it, Builder.SqlParameterKeyWord + it.DbColumnName)));
                 return string.Format(SqlTemplate, GetTableNameString, columnsString, columnParametersString);
             }
             else
@@ -182,7 +197,7 @@ namespace SqlSugar
                         {
                             batchInsetrSql.Append(SqlTemplateBatchUnion);
                         }
-                        batchInsetrSql.Append("\r\n SELECT " + string.Join(",", columns.Select(it => string.Format(SqlTemplateBatchSelect, FormatValue(it.Value),Builder.GetTranslationColumnName(it.DbColumnName)))));
+                        batchInsetrSql.Append("\r\n SELECT " + string.Join(",", columns.Select(it => string.Format(SqlTemplateBatchSelect,this.GetDbColumn(it, FormatValue(it.Value)),Builder.GetTranslationColumnName(it.DbColumnName)))));
                         ++i;
                     }
                     pageIndex++;
@@ -245,8 +260,7 @@ namespace SqlSugar
                 }
                 else if (type == UtilConstants.DateTimeOffsetType)
                 {
-                    var date = UtilMethods.ConvertFromDateTimeOffset((DateTimeOffset)value);
-                    return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+                    return FormatDateTimeOffset(value);
                 }
                 else if (type == UtilConstants.FloatType) 
                 {
@@ -258,6 +272,110 @@ namespace SqlSugar
                 }
             }
         }
+
+        public virtual string FormatDateTimeOffset(object value)
+        {
+            var date = UtilMethods.ConvertFromDateTimeOffset((DateTimeOffset)value);
+            return "'" + date.ToString("yyyy-MM-dd HH:mm:ss.fff") + "'";
+        }
+
+        private int GetDbColumnIndex = 0;
+        public virtual string GetDbColumn(DbColumnInfo columnInfo ,object name) 
+        {
+            if (columnInfo.InsertServerTime)
+            {
+                return LambdaExpressions.DbMehtods.GetDate();
+            }
+            else if (UtilMethods.IsErrorDecimalString() == true)
+            {
+                var pname = Builder.SqlParameterKeyWord + "Decimal" + GetDbColumnIndex;
+                var p = new SugarParameter(pname, columnInfo.Value);
+                this.Parameters.Add(p);
+                GetDbColumnIndex++;
+                return pname;
+            }
+            else if (columnInfo.InsertSql.HasValue())
+            {
+                if (columnInfo.InsertSql.Contains("{0}")) 
+                {
+                    if (columnInfo.Value == null)
+                    {
+                        return string.Format(columnInfo.InsertSql, "null").Replace("'null'","null");
+                    }
+                    else
+                    {
+                        return string.Format(columnInfo.InsertSql, columnInfo.Value?.ObjToString().ToSqlFilter());
+                    }
+                }
+                return columnInfo.InsertSql;
+            }
+            else if (columnInfo.SqlParameterDbType is Type && (Type)columnInfo.SqlParameterDbType == UtilConstants.SqlConvertType)
+            {
+                var type = columnInfo.SqlParameterDbType as Type;
+                var ParameterConverter = type.GetMethod("ParameterConverter").MakeGenericMethod(typeof(string));
+                var obj = Activator.CreateInstance(type);
+                var p = ParameterConverter.Invoke(obj, new object[] { columnInfo.Value, GetDbColumnIndex }) as SugarParameter;
+                return p.ParameterName;
+            }
+            else if (columnInfo.SqlParameterDbType is Type)
+            {
+                var type=columnInfo.SqlParameterDbType as Type;
+                var ParameterConverter=type.GetMethod("ParameterConverter").MakeGenericMethod(columnInfo.PropertyType);
+                var obj=Activator.CreateInstance(type);
+                var p = ParameterConverter.Invoke(obj,new object[] {columnInfo.Value, GetDbColumnIndex }) as SugarParameter;
+                GetDbColumnIndex++;
+                //this.Parameters.RemoveAll(it => it.ParameterName == it.ParameterName);
+                UtilMethods.ConvertParameter(p,this.Builder);
+                this.Parameters.Add(p);
+                return p.ParameterName;
+            }
+            else if (columnInfo.DataType?.Equals("nvarchar2")==true) 
+            {
+                var pname = Builder.SqlParameterKeyWord + columnInfo.DbColumnName + "_ts" + GetDbColumnIndex;
+                var p = new SugarParameter(pname, columnInfo.Value);
+                p.IsNvarchar2 = true;
+                this.Parameters.Add(p);
+                GetDbColumnIndex++;
+                return pname;
+            }
+            else if (columnInfo.PropertyType!=null&&columnInfo.PropertyType.Name == "TimeOnly" )
+            {
+                var timeSpan = UtilMethods.TimeOnlyToTimeSpan(columnInfo.Value);
+                var pname = Builder.SqlParameterKeyWord + columnInfo.DbColumnName + "_ts" + GetDbColumnIndex;
+                this.Parameters.Add(new SugarParameter(pname, timeSpan));
+                GetDbColumnIndex++;
+                return pname;
+            }
+            else if (columnInfo.PropertyType != null && columnInfo.PropertyType.Name == "DateOnly")
+            {
+                var timeSpan = UtilMethods.DateOnlyToDateTime(columnInfo.Value);
+                var pname = Builder.SqlParameterKeyWord + columnInfo.DbColumnName + "_ts" + GetDbColumnIndex;
+                if (timeSpan == null)
+                {
+                    this.Parameters.Add(new SugarParameter(pname, null) { DbType=System.Data.DbType.Date });
+                }
+                else
+                {
+                    this.Parameters.Add(new SugarParameter(pname, Convert.ToDateTime(timeSpan)));
+                }
+                GetDbColumnIndex++;
+                return pname;
+            }
+            else if (UtilMethods.IsErrorParameterName(this.Context.CurrentConnectionConfig, columnInfo))
+            {
+                var pname = Builder.SqlParameterKeyWord + "CrorrPara" + GetDbColumnIndex;
+                var p = new SugarParameter(pname, columnInfo.Value);
+                this.Parameters.Add(p);
+                GetDbColumnIndex++;
+                return pname;
+
+            }
+            else
+            {
+                return name + "";
+            }
+        }
+
         #endregion
     }
 }

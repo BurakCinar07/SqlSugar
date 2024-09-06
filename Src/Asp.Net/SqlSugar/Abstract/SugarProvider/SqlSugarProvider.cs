@@ -1,9 +1,11 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Dynamic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection; 
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -26,6 +28,10 @@ namespace SqlSugar
             this.ContextID = Guid.NewGuid();
             Check.ArgumentNullException(config, "config is null");
             CheckDbDependency(config);
+            if (StaticConfig.CompleteDbFunc != null) 
+            {
+                StaticConfig.CompleteDbFunc(this);
+            }
         }
         #endregion
 
@@ -76,6 +82,21 @@ namespace SqlSugar
         #endregion
 
         #region Queryable
+        public QueryMethodInfo QueryableByObject(Type entityType) 
+        {
+            QueryMethodInfo result = new QueryMethodInfo();
+            var method=this.GetType().GetMyMethod("Queryable", 0);
+            var methodT=method.MakeGenericMethod(entityType);
+            var queryableObj=methodT.Invoke(this,new object[] {});
+            result.QueryableObj = queryableObj;
+            result.Context = this.Context;
+            result.EntityType = entityType;
+            return result;
+        }
+        public QueryMethodInfo QueryableByObject(Type entityType, string shortName)
+        {
+            return this.QueryableByObject(entityType).AS(this.Context.EntityMaintenance.GetTableName(entityType),shortName);
+        }
         /// <summary>
         /// Get datebase time
         /// </summary>
@@ -106,6 +127,7 @@ namespace SqlSugar
 
             InitMappingInfo<T>();
             var result = this.CreateQueryable<T>();
+            UtilMethods.AddDiscrimator(typeof(T), result);
             return result;
         }
         /// <summary>
@@ -113,7 +135,7 @@ namespace SqlSugar
         /// </summary>
         public virtual ISugarQueryable<T> Queryable<T>(string shortName)
         {
-            Check.Exception(shortName.HasValue() && shortName.Length > 20, ErrorMessage.GetThrowMessage("shortName参数长度不能超过20，你可能是想用这个方法 db.SqlQueryable(sql)而不是db.Queryable(shortName)", "Queryable.shortName max length 20"));
+            Check.Exception(shortName.HasValue() && shortName.Length > 40, ErrorMessage.GetThrowMessage("shortName参数长度不能超过40，你可能是想用这个方法 db.SqlQueryable(sql)而不是db.Queryable(shortName)", "Queryable.shortName max length 20"));
             var queryable = Queryable<T>();
             queryable.SqlBuilder.QueryBuilder.TableShortName = shortName;
             return queryable;
@@ -407,13 +429,26 @@ namespace SqlSugar
             queryable.Where(joinExpression);
             return queryable;
         }
-        public virtual ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable) where T : class, new()
+        public virtual ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable)  
         {
             var sqlobj = queryable.ToSql();
-            var result = this.SqlQueryable<T>(sqlobj.Key).AddParameters(sqlobj.Value);
+            var newQueryable = this.SqlQueryable<object>(sqlobj.Key).AddParameters(sqlobj.Value);
+            var result = newQueryable.Select<T>(newQueryable.QueryBuilder.SelectValue+"");
             result.QueryBuilder.IsSqlQuery = false;
+            result.QueryBuilder.NoCheckInclude = true;
+            result.QueryBuilder.Includes = queryable.QueryBuilder.Includes?.ToList();
             return result;
         }
+        public virtual ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable,string shortName)
+        {
+            var result = Queryable(queryable);
+            var key = result.QueryBuilder.AsTables.First().Key;
+            var value = result.QueryBuilder.AsTables.First().Value;
+            result.QueryBuilder.AsTables.Remove(key);
+            result.QueryBuilder.AsTables.Add(key, value.TrimEnd(' ').TrimEnd('t') + shortName);
+            return result;
+        }
+
         public virtual ISugarQueryable<T, T2> Queryable<T, T2>(
      ISugarQueryable<T> joinQueryable1, ISugarQueryable<T2> joinQueryable2, Expression<Func<T, T2, bool>> joinExpression) where T : class, new() where T2 : class, new()
         {
@@ -445,7 +480,7 @@ namespace SqlSugar
             var sqlObj1 = joinQueryable1.ToSql();
             string sql1 = sqlObj1.Key;
             UtilMethods.RepairReplicationParameters(ref sql1, sqlObj1.Value.ToArray(), 0, "Join");
-            queryable.QueryBuilder.EntityName = sqlBuilder.GetPackTable(sql1, shortName1); ;
+            queryable.QueryBuilder.EntityName = sqlBuilder.GetPackTable(sql1, sqlBuilder.GetTranslationColumnName(shortName1)); ;
             queryable.QueryBuilder.Parameters.AddRange(sqlObj1.Value);
 
             //join table 1
@@ -455,7 +490,7 @@ namespace SqlSugar
             UtilMethods.RepairReplicationParameters(ref sql2, sqlObj2.Value.ToArray(), 1, "Join");
             queryable.QueryBuilder.Parameters.AddRange(sqlObj2.Value);
             var exp = queryable.QueryBuilder.GetExpressionValue(joinExpression, ResolveExpressType.WhereMultiple);
-            queryable.QueryBuilder.JoinQueryInfos.Add(new JoinQueryInfo() { JoinIndex = 0, JoinType = joinType, JoinWhere = exp.GetResultString(), TableName = sqlBuilder.GetPackTable(sql2, shortName2) });
+            queryable.QueryBuilder.JoinQueryInfos.Add(new JoinQueryInfo() { JoinIndex = 0, JoinType = joinType, JoinWhere = exp.GetResultString(), TableName = sqlBuilder.GetPackTable(sql2,sqlBuilder.GetTranslationColumnName(shortName2)) });
 
             return queryable;
         }
@@ -581,7 +616,7 @@ namespace SqlSugar
         }
         #endregion
 
-        public virtual ISugarQueryable<T> UnionAll<T>(params ISugarQueryable<T>[] queryables) where T : class, new()
+        public virtual ISugarQueryable<T> UnionAll<T>(params ISugarQueryable<T>[] queryables) where T : class 
         {
             return _UnionAll(queryables);
         }
@@ -596,7 +631,14 @@ namespace SqlSugar
             {
                 var sqlObj = item.ToSql();
                 string sql = sqlObj.Key;
-                UtilMethods.RepairReplicationParameters(ref sql, sqlObj.Value.ToArray(), i, "UnionAll");
+                if (this.CurrentConnectionConfig?.MoreSettings?.MaxParameterNameLength > 0)
+                {
+                    UtilMethods.RepairReplicationParameters(this.Context,ref sql, sqlObj.Value.ToArray(), i, "UnionAll");
+                }
+                else
+                {
+                    UtilMethods.RepairReplicationParameters(ref sql, sqlObj.Value.ToArray(), i, "UnionAll");
+                }
                 if (sqlObj.Value.HasValue())
                     allItems.Add(new KeyValuePair<string, List<SugarParameter>>(sqlBuilder.GetUnionFomatSql(sql), sqlObj.Value));
                 else
@@ -605,24 +647,28 @@ namespace SqlSugar
             }
             var allSql = sqlBuilder.GetUnionAllSql(allItems.Select(it => it.Key).ToList());
             var allParameters = allItems.SelectMany(it => it.Value).ToArray();
-            var resulut = this.Context.Queryable<ExpandoObject>().AS(UtilMethods.GetPackTable(allSql, "unionTable")).With(SqlWith.Null);
+            var resulut = this.Context.Queryable<object>().AS(UtilMethods.GetPackTable(allSql, "unionTable")).With(SqlWith.Null);
             resulut.AddParameters(allParameters);
             if (this.Context.CurrentConnectionConfig.DbType == DbType.Oracle && sqlBuilder.SqlSelectAll == "*")
             {
                 return resulut.Select<T>("unionTable.*");
             }
-            else
+            else if (this.Context.CurrentConnectionConfig?.MoreSettings?.IsWithNoLockQuery==true)
             {
+                return resulut.Select<T>(sqlBuilder.SqlSelectAll).With(SqlWith.Null);
+            }
+            else
+            { 
                 return resulut.Select<T>(sqlBuilder.SqlSelectAll);
             }
         }
 
-        public virtual ISugarQueryable<T> UnionAll<T>(List<ISugarQueryable<T>> queryables) where T : class, new()
+        public virtual ISugarQueryable<T> UnionAll<T>(List<ISugarQueryable<T>> queryables) where T : class 
         {
             Check.Exception(queryables.IsNullOrEmpty(), "UnionAll.queryables is null ");
             return UnionAll(queryables.ToArray());
         }
-        public virtual ISugarQueryable<T> Union<T>(params ISugarQueryable<T>[] queryables) where T : class, new()
+        public virtual ISugarQueryable<T> Union<T>(params ISugarQueryable<T>[] queryables) where T : class 
         {
             var sqlBuilder = InstanceFactory.GetSqlbuilder(this.Context.CurrentConnectionConfig);
             Check.Exception(queryables.IsNullOrEmpty(), "UnionAll.queryables is null ");
@@ -633,7 +679,14 @@ namespace SqlSugar
                 item.QueryBuilder.DisableTop = true;
                 var sqlObj = item.ToSql();
                 string sql = sqlObj.Key;
-                UtilMethods.RepairReplicationParameters(ref sql, sqlObj.Value.ToArray(), i, "Union");
+                if (this.CurrentConnectionConfig?.MoreSettings?.MaxParameterNameLength > 0)
+                {
+                    UtilMethods.RepairReplicationParameters(this.Context, ref sql, sqlObj.Value.ToArray(), i, "Union");
+                }
+                else
+                {
+                    UtilMethods.RepairReplicationParameters(ref sql, sqlObj.Value.ToArray(), i, "Union");
+                }
                 if (sqlObj.Value.HasValue())
                     allItems.Add(new KeyValuePair<string, List<SugarParameter>>(sqlBuilder.GetUnionFomatSql(sql), sqlObj.Value));
                 else
@@ -642,7 +695,7 @@ namespace SqlSugar
             }
             var allSql = sqlBuilder.GetUnionSql(allItems.Select(it => it.Key).ToList());
             var allParameters = allItems.SelectMany(it => it.Value).ToArray();
-            var resulut = this.Context.Queryable<ExpandoObject>().AS(UtilMethods.GetPackTable(allSql, "unionTable")).With(SqlWith.Null);
+            var resulut = this.Context.Queryable<object>().AS(UtilMethods.GetPackTable(allSql, "unionTable")).With(SqlWith.Null);
             resulut.AddParameters(allParameters);
             if (this.Context.CurrentConnectionConfig.DbType == DbType.Oracle && sqlBuilder.SqlSelectAll == "*")
             {
@@ -653,7 +706,7 @@ namespace SqlSugar
                 return resulut.Select<T>(sqlBuilder.SqlSelectAll);
             }
         }
-        public virtual ISugarQueryable<T> Union<T>(List<ISugarQueryable<T>> queryables) where T : class, new()
+        public virtual ISugarQueryable<T> Union<T>(List<ISugarQueryable<T>> queryables) where T : class 
         {
             Check.Exception(queryables.IsNullOrEmpty(), "Union.queryables is null ");
             return Union(queryables.ToArray());
@@ -667,13 +720,65 @@ namespace SqlSugar
             var result= this.Context.Queryable<T>().AS(sqlBuilder.GetPackTable(sql, sqlBuilder.GetDefaultShortName())).With(SqlWith.Null).Select(sqlBuilder.GetDefaultShortName() + ".*");
             result.QueryBuilder.IsSqlQuery = true;
             result.QueryBuilder.OldSql = sql;
+            result.QueryBuilder.NoCheckInclude = true;
             return result;
         }
         #endregion
 
         #region Insertable
+        public IInsertable<Dictionary<string, object>> InsertableByDynamic(object insertDynamicObject)
+        {
+            return this.Insertable<Dictionary<string, object>>(insertDynamicObject);
+        }
+        public InsertMethodInfo InsertableByObject(object singleEntityObjectOrListObject)
+        {
+            if (singleEntityObjectOrListObject == null)
+                return new InsertMethodInfo();
+            if (singleEntityObjectOrListObject.GetType().FullName.IsCollectionsList())
+            {
+                var list = ((IList)singleEntityObjectOrListObject);
+                if (list == null || list.Count == 0)
+                    return new InsertMethodInfo();
+                var type = list[0].GetType();
+                var newList = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(type));
+                foreach (var item in list)
+                {
+                    newList.Add(item);
+                }
+                var methods = this.Context.GetType().GetMethods()
+               .Where(it => it.Name == "Insertable")
+               .Where(it => it.GetGenericArguments().Any())
+               .Where(it => it.GetParameters().Any(z => z.ParameterType.Name.StartsWith("List")))
+               .Where(it => it.Name == "Insertable").ToList();
+                var method = methods.Single().MakeGenericMethod(newList.GetType().GetGenericArguments().First());
+                InsertMethodInfo result = new InsertMethodInfo()
+                {
+                    Context = this.Context,
+                    MethodInfo = method,
+                    objectValue = newList
+                };
+                return result;
+            }
+            else
+            {
+                var methods = this.Context.GetType().GetMethods()
+                    .Where(it => it.Name == "Insertable")
+                    .Where(it => it.GetGenericArguments().Any())
+                    .Where(it => it.GetParameters().Any(z => z.ParameterType.Name == "T"))
+                    .Where(it => it.Name == "Insertable").ToList();
+                var method = methods.Single().MakeGenericMethod(singleEntityObjectOrListObject.GetType());
+                InsertMethodInfo result = new InsertMethodInfo()
+                {
+                    Context = this.Context,
+                    MethodInfo = method,
+                    objectValue = singleEntityObjectOrListObject
+                };
+                return result;
+            }
+        }
         public virtual IInsertable<T> Insertable<T>(T[] insertObjs) where T : class, new()
         {
+            UtilMethods.CheckArray(insertObjs);
             InitMappingInfo<T>();
             InsertableProvider<T> result = this.CreateInsertable(insertObjs);
             return result;
@@ -717,10 +822,60 @@ namespace SqlSugar
         #endregion
 
         #region Deleteable
+        public DeleteMethodInfo DeleteableByObject(object singleEntityObjectOrListObject)
+        {
+            if (singleEntityObjectOrListObject == null)
+                return new DeleteMethodInfo();
+            if (singleEntityObjectOrListObject.GetType().FullName.IsCollectionsList())
+            {
+                var list = ((IList)singleEntityObjectOrListObject);
+                if (list == null || list.Count == 0)
+                    return new DeleteMethodInfo();
+                var type = list[0].GetType();
+                var newList = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(type));
+                foreach (var item in list)
+                {
+                    newList.Add(item);
+                }
+                var methods = this.Context.GetType().GetMethods()
+               .Where(it => it.Name == "Deleteable")
+               .Where(it => it.GetGenericArguments().Any())
+               .Where(it => it.GetParameters().Any(z =>z.Name!= "pkValue" && z.ParameterType.Name.StartsWith("List")))
+               .Where(it => it.Name == "Deleteable").ToList();
+                var method = methods.FirstOrDefault().MakeGenericMethod(newList.GetType().GetGenericArguments().FirstOrDefault());
+                DeleteMethodInfo result = new DeleteMethodInfo()
+                {
+                    Context = this.Context,
+                    MethodInfo = method,
+                    objectValue = newList
+                };
+                return result;
+            }
+            else
+            {
+                var methods = this.Context.GetType().GetMethods()
+                    .Where(it => it.Name == "Deleteable")
+                    .Where(it => it.GetGenericArguments().Any())
+                    .Where(it => it.GetParameters().Any(z => z.ParameterType.Name == "T"))
+                    .Where(it => it.Name == "Deleteable").ToList();
+                var method = methods.Single().MakeGenericMethod(singleEntityObjectOrListObject.GetType());
+                DeleteMethodInfo result = new DeleteMethodInfo()
+                {
+                    Context = this.Context,
+                    MethodInfo = method,
+                    objectValue = singleEntityObjectOrListObject
+                };
+                return result;
+            }
+        }
         public virtual IDeleteable<T> Deleteable<T>() where T : class, new()
         {
             InitMappingInfo<T>();
             DeleteableProvider<T> result = this.CreateDeleteable<T>();
+            if (this.Context.CurrentConnectionConfig?.MoreSettings?.IsAutoDeleteQueryFilter == true)
+            {
+                return result.EnableQueryFilter();
+            }
             return result;
         }
         public virtual IDeleteable<T> Deleteable<T>(Expression<Func<T, bool>> expression) where T : class, new()
@@ -756,9 +911,71 @@ namespace SqlSugar
         #endregion
 
         #region Updateable
+        public UpdateMethodInfo UpdateableByObject(object singleEntityObjectOrListObject)
+        {
+            if (singleEntityObjectOrListObject == null)
+                return new UpdateMethodInfo();
+            if (singleEntityObjectOrListObject.GetType().FullName.IsCollectionsList())
+            {
+                var list = ((IList)singleEntityObjectOrListObject);
+                if (list == null || list.Count == 0)
+                    return new UpdateMethodInfo();
+                var type = list[0].GetType();
+                var newList = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(type));
+                foreach (var item in list)
+                {
+                    newList.Add(item);
+                }
+                var methods = this.Context.GetType().GetMethods()
+               .Where(it => it.Name == "Updateable")
+               .Where(it => it.GetGenericArguments().Any())
+               .Where(it => it.GetParameters().Any(z => z.ParameterType.Name.StartsWith("List")))
+               .Where(it => it.Name == "Updateable").ToList();
+                var method = methods.Single().MakeGenericMethod(newList.GetType().GetGenericArguments().First());
+                UpdateMethodInfo result = new UpdateMethodInfo()
+                {
+                    Context = this.Context,
+                    MethodInfo = method,
+                    objectValue = newList
+                };
+                return result;
+            }
+            else
+            {
+                var methods = this.Context.GetType().GetMethods()
+                    .Where(it => it.Name == "Updateable")
+                    .Where(it => it.GetGenericArguments().Any())
+                    .Where(it => it.GetParameters().Any(z => z.ParameterType.Name == "T"))
+                    .Where(it => it.Name == "Updateable").ToList();
+                var method = methods.Single().MakeGenericMethod(singleEntityObjectOrListObject.GetType());
+                UpdateMethodInfo result = new UpdateMethodInfo()
+                {
+                    Context = this.Context,
+                    MethodInfo = method,
+                    objectValue = singleEntityObjectOrListObject
+                };
+                return result;
+            }
+        }
+        public UpdateExpressionMethodInfo UpdateableByObject(Type entityType)
+        {
+            UpdateExpressionMethodInfo reslut = new UpdateExpressionMethodInfo();
+            var methods = this.Context.GetType().GetMethods()
+             .Where(it => it.Name == "Updateable")
+             .Where(it => it.GetGenericArguments().Any())
+             .Where(it => !it.GetParameters().Any())
+             .Where(it => it.Name == "Updateable").ToList();
+            var method = methods.Single().MakeGenericMethod(entityType);
+            reslut.Context = this.Context;
+            reslut.MethodInfo = method;
+            reslut.Type = entityType;
+            reslut.objectValue = method.Invoke(Context, new object[] { });
+            return reslut;
+        }
         public virtual IUpdateable<T> Updateable<T>(T[] UpdateObjs) where T : class, new()
         {
             InitMappingInfo<T>();
+            Check.ExceptionEasy(UpdateObjs is IList&&typeof(T).FullName.IsCollectionsList(), "The methods you encapsulate are loaded incorrectly, so List<T> should be Updateable<T>(List<T> UpdateObjs)where T: class, new()", "你封装的方法进错重载，List<T>应该进Updateable<T>(List<T> UpdateObjs)where T : class, new()重载");
             UpdateableProvider<T> result = this.CreateUpdateable(UpdateObjs);
             return result;
         }
@@ -775,12 +992,17 @@ namespace SqlSugar
         }
         public virtual IUpdateable<T> Updateable<T>(T UpdateObj) where T : class, new()
         {
+
             return this.Context.Updateable(new T[] { UpdateObj });
         }
         public virtual IUpdateable<T> Updateable<T>() where T : class, new()
         {
             var result = this.Context.Updateable(new T[] { new T() });
             result.UpdateParameterIsNull = true;
+            if (this.Context.CurrentConnectionConfig?.MoreSettings?.IsAutoUpdateQueryFilter == true)
+            {
+                return result.EnableQueryFilter();
+            }
             return result;
         }
         public virtual IUpdateable<T> Updateable<T>(Expression<Func<T, T>> columns) where T : class, new()
@@ -796,6 +1018,10 @@ namespace SqlSugar
             return result;
         }
 
+        public IUpdateable<Dictionary<string, object>> UpdateableByDynamic(object updateDynamicObject) 
+        {
+            return this.Updateable<Dictionary<string, object>>(updateDynamicObject);
+        }
 
         public virtual IUpdateable<T> Updateable<T>(Dictionary<string, object> columnDictionary) where T : class, new()
         {
@@ -823,6 +1049,27 @@ namespace SqlSugar
         #endregion
 
         #region Saveable
+        public GridSaveProvider<T> GridSave<T>(List<T> saveList) where T : class, new()
+        {
+            Check.ExceptionEasy(saveList == null, "saveList is null", "saveList 不能是 null");
+            var isTran = this.Context.TempItems != null
+                                          && this.Context.TempItems.Any(it => it.Key == "OldData_" + saveList.GetHashCode());
+            Check.ExceptionEasy(isTran == false, "saveList no tracking", "saveList 没有使用跟踪");
+            var oldList = (List<T>)this.Context.TempItems.FirstOrDefault(it => it.Key == "OldData_" + saveList.GetHashCode()).Value;
+            return GridSave(oldList, saveList);
+        }
+        public GridSaveProvider<T> GridSave<T>(List<T> oldList, List<T> saveList) where T : class, new() 
+        {
+            GridSaveProvider<T> result = new GridSaveProvider<T>();
+            result.Context = this;
+            result.OldList = oldList;
+            result.SaveList = saveList;
+            return result;
+        }
+        public IStorageable<T> Storageable<T>(T[] dataList) where T : class, new()
+        {
+            return Storageable(dataList?.ToList());
+        }
         public ISaveable<T> Saveable<T>(List<T> saveObjects) where T : class, new()
         {
             return new SaveableProvider<T>(this, saveObjects);
@@ -831,13 +1078,30 @@ namespace SqlSugar
         {
             return new SaveableProvider<T>(this, saveObject);
         }
+        public StorageableDataTable Storageable(List<Dictionary<string, object>> dictionaryList, string tableName)
+        {
+            DataTable dt = this.Context.Utilities.DictionaryListToDataTable(dictionaryList);
+            dt.TableName = tableName;
+            return this.Context.Storageable(dt);
+        }
+        public StorageableDataTable Storageable(Dictionary<string, object> dictionary, string tableName)
+        {
+            DataTable dt = this.Context.Utilities.DictionaryListToDataTable(new List<Dictionary<string, object>>() { dictionary });
+            dt.TableName = tableName;
+            return this.Context.Storageable(dt);
+        }
         public IStorageable<T> Storageable<T>(List<T> dataList) where T : class, new()
         {
+            dataList = dataList.Where(it => it != null).ToList();
             this.InitMappingInfo<T>();
             var sqlBuilder = InstanceFactory.GetSqlbuilder(this.Context.CurrentConnectionConfig);
             var result= new Storageable<T>(dataList,this);
             result.Builder = sqlBuilder;
             return result;
+        }
+        public IStorageable<T> Storageable<T>(IList<T> dataList) where T : class, new()
+        {
+            return Storageable(dataList?.ToList());
         }
         public IStorageable<T> Storageable<T>(T data) where T : class, new()
         {
@@ -854,6 +1118,52 @@ namespace SqlSugar
             data.Columns.Add(new DataColumn("SugarErrorMessage", typeof(string)));
             data.Columns.Add(new DataColumn("SugarColumns", typeof(string[])));
             return result;
+        }
+        public StorageableMethodInfo StorageableByObject(object singleEntityObjectOrList)
+        {
+            if (singleEntityObjectOrList == null)
+                return new StorageableMethodInfo();
+            if (singleEntityObjectOrList.GetType().FullName.IsCollectionsList())
+            {
+                var list = ((IList)singleEntityObjectOrList);
+                if(list==null|| list.Count==0)
+                    return new StorageableMethodInfo();
+                var type=list[0].GetType();
+                var newList = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(type)) ;
+                foreach (var item in list)
+                {
+                    newList.Add(item);
+                }
+               var methods = this.Context.GetType().GetMethods()
+              .Where(it => it.Name == "Storageable")
+              .Where(it => it.GetGenericArguments().Any())
+              .Where(it => it.GetParameters().Any(z => z.ParameterType.Name.StartsWith("List")))
+              .Where(it => it.Name == "Storageable").ToList();
+                var method = methods.Single().MakeGenericMethod(newList.GetType().GetGenericArguments().First());
+                StorageableMethodInfo result = new StorageableMethodInfo()
+                {
+                    Context = this.Context,
+                    MethodInfo = method,
+                    objectValue = newList
+                };
+                return result;
+            }
+            else
+            {
+                var methods = this.Context.GetType().GetMethods()
+                    .Where(it => it.Name == "Storageable")
+                    .Where(it => it.GetGenericArguments().Any())
+                    .Where(it => it.GetParameters().Any(z => z.ParameterType.Name == "T"))
+                    .Where(it => it.Name == "Storageable").ToList();
+                var method = methods.Single().MakeGenericMethod(singleEntityObjectOrList.GetType());
+                StorageableMethodInfo result = new StorageableMethodInfo()
+                {
+                    Context = this.Context,
+                    MethodInfo = method,
+                    objectValue = singleEntityObjectOrList
+                };
+                return result;
+            }
         }
         #endregion
 
@@ -886,6 +1196,102 @@ namespace SqlSugar
             result.formatBuilder.Context = this;
             result.queryBuilder = this.Queryable<object>().QueryBuilder;
             return result;
+        }
+        #endregion
+
+        #region  Nav CUD
+        public InsertNavTaskInit<T, T> InsertNav<T>(T data) where T : class, new()
+        {
+            return InsertNav(new List<T>() { data });
+        }
+        public InsertNavTaskInit<T, T> InsertNav<T>(List<T> datas) where T : class, new()
+        {
+            var result = new InsertNavTaskInit<T, T>();
+            var provider = new InsertNavProvider<T, T>();
+            provider._Roots = datas;
+            provider._Context = this;
+            result.insertNavProvider = provider;
+            result.NavContext = new NavContext() { Items = new List<NavContextItem>() };
+            return result;
+        }
+        public InsertNavTaskInit<T, T> InsertNav<T>(T data, InsertNavRootOptions rootOptions) where T : class, new()
+        {
+            return InsertNav(new List<T>() { data },rootOptions); ;
+        }
+        public InsertNavTaskInit<T, T> InsertNav<T>(List<T> datas, InsertNavRootOptions rootOptions) where T : class, new()
+        {
+            var result = new InsertNavTaskInit<T, T>();
+            var provider = new InsertNavProvider<T, T>();
+            provider._Roots = datas;
+            provider._Context = this;
+            provider._RootOptions = rootOptions;
+            result.insertNavProvider = provider;
+            result.NavContext = new NavContext() { Items = new List<NavContextItem>() };
+            return result;
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(T data) where T : class, new()
+        {
+            return DeleteNav(new List<T>() { data });
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(List<T> datas) where T : class, new()
+        {
+            var result = new DeleteNavTaskInit<T, T>();
+            result.deleteNavProvider = new DeleteNavProvider<T, T>();
+            result.deleteNavProvider._Roots = datas;
+            result.deleteNavProvider._Context = this;
+            return result;
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(Expression<Func<T, bool>> whereExpression) where T : class, new() 
+        {
+            return DeleteNav(this.Queryable<T>().Where(whereExpression).ToList());
+        }
+
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(T data, DeleteNavRootOptions options) where T : class, new()
+        {
+            return DeleteNav(new List<T>() { data }, options);
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(List<T> datas, DeleteNavRootOptions options) where T : class, new()
+        {
+            var result = new DeleteNavTaskInit<T, T>();
+            result.deleteNavProvider = new DeleteNavProvider<T, T>();
+            result.deleteNavProvider._Roots = datas;
+            result.deleteNavProvider._Context = this;
+            result.deleteNavProvider._RootOptions = options;
+            return result;
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(Expression<Func<T, bool>> whereExpression, DeleteNavRootOptions options) where T : class, new()
+        {
+            return DeleteNav(this.Queryable<T>().Where(whereExpression).ToList(),options);
+        }
+
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(T data) where T : class, new()
+        {
+            return UpdateNav(new List<T>() { data });
+        }
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(List<T> datas) where T : class, new()
+        {
+            var result = new UpdateNavTaskInit<T, T>();
+            var provider = new UpdateNavProvider<T, T>();
+            provider._Roots = datas;
+            provider._Context = this;
+            result.UpdateNavProvider = provider;
+            result.NavContext = new NavContext() { Items = new List<NavContextItem>() { } };
+            return result;
+        }
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(T data, UpdateNavRootOptions rootOptions) where T : class, new()
+        {
+            return UpdateNav(new List<T>() { data},rootOptions);
+        }
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(List<T> datas, UpdateNavRootOptions rootOptions) where T : class, new()
+        {
+            var result = new UpdateNavTaskInit<T, T>();
+            var provider = new UpdateNavProvider<T, T>();
+            provider._Roots = datas;
+            provider._RootOptions = rootOptions;
+            provider._Context = this;
+            result.UpdateNavProvider = provider;
+            result.NavContext = new NavContext() { Items = new List<NavContextItem>() { } };
+            return result; ;
         }
         #endregion
 
@@ -987,6 +1393,27 @@ namespace SqlSugar
         {
             return new SimpleClient<T>(this);
         }
+
+        public RepositoryType GetRepository<RepositoryType>() where RepositoryType : ISugarRepository, new()
+        {
+            Type type = typeof(RepositoryType);
+            var isAnyParamter = type.GetConstructors().Any(z => z.GetParameters().Any());
+            object o = null;
+            if (isAnyParamter)
+            {
+                o = Activator.CreateInstance(type, new string[] { null });
+            }
+            else
+            {
+                o = Activator.CreateInstance(type);
+            }
+            var result = (RepositoryType)o;
+            if (result.Context == null)
+            {
+                result.Context = this.Context;
+            }
+            return result;
+        }
         //public virtual SimpleClient GetSimpleClient()
         //{
         //    if (this._SimpleClient == null)
@@ -1085,7 +1512,19 @@ namespace SqlSugar
             {
                 Queues = new QueueList();
             }
-            this.Queues.Add(sql, this.Context.Ado.GetParameters(parsmeters));
+            var pars = this.Context.Ado.GetParameters(parsmeters);
+            if (pars != null)
+            {
+                foreach (var par in pars)
+                {
+                    if (par.ParameterName.StartsWith(":"))
+                    {
+                        par.ParameterName = ("@" + par.ParameterName.Trim(':'));
+                    }
+                }
+            }
+            this.Queues.Add(sql, pars);
+            
         }
         public void AddQueue(string sql, SugarParameter parsmeter)
         {
@@ -1123,6 +1562,13 @@ namespace SqlSugar
                 var index = 1;
                 if (this.Queues.HasValue())
                 {
+                    var repeatList =
+                        Queues.SelectMany(it => it.Parameters ?? new SugarParameter[] { }).Select(it => it.ParameterName)
+                       .GroupBy(it => it?.ToLower())
+                       .Where(it => it.Count() > 1);
+                    var repeatCount = repeatList.Count();
+                    var isParameterNameRepeat = repeatList
+                        .Count() > 0;
                     foreach (var item in Queues)
                     {
                         if (item.Sql == null)
@@ -1137,8 +1583,16 @@ namespace SqlSugar
                             var newName = itemParameter.ParameterName + "_q_" + index;
                             SugarParameter parameter = new SugarParameter(newName, itemParameter.Value);
                             parameter.DbType = itemParameter.DbType;
-                            itemSql = UtilMethods.ReplaceSqlParameter(itemSql, itemParameter, newName);
-                            addParameters.Add(parameter);
+                            if (repeatCount>500||(isParameterNameRepeat&& repeatList.Any(it=>it.Key.EqualCase(itemParameter.ParameterName))))
+                            {
+                                itemSql = UtilMethods.ReplaceSqlParameter(itemSql, itemParameter, newName);
+                                addParameters.Add(parameter);
+                            }
+                            else
+                            {
+                                parameter.ParameterName = itemParameter.ParameterName;
+                                addParameters.Add(parameter);
+                            }
                         }
                         parsmeters.AddRange(addParameters);
                         itemSql = itemSql
@@ -1156,6 +1610,8 @@ namespace SqlSugar
                     }
                 }
                 this.Queues.Clear();
+                var builder = InstanceFactory.GetSqlbuilder(this.Context.CurrentConnectionConfig);
+                builder.FormatSaveQueueSql(sqlBuilder);
                 var result = await func(sqlBuilder.ToString(), parsmeters);
                 if (isTran) this.Ado.CommitTran();
                 return result;
@@ -1182,6 +1638,13 @@ namespace SqlSugar
                 var index = 1;
                 if (this.Queues.HasValue())
                 {
+                    var repeatList =
+                         Queues.SelectMany(it => it.Parameters ?? new SugarParameter[] { }).Select(it => it.ParameterName)
+                        .GroupBy(it => it?.ToLower())
+                        .Where(it => it.Count() > 1);
+                    var repeatCount = repeatList.Count();
+                    var isParameterNameRepeat = repeatList
+                        .Count() > 0;
                     foreach (var item in Queues)
                     {
                         if (item.Sql == null)
@@ -1196,7 +1659,14 @@ namespace SqlSugar
                             var newName = itemParameter.ParameterName + "_q_" + index;
                             SugarParameter parameter = new SugarParameter(newName, itemParameter.Value);
                             parameter.DbType = itemParameter.DbType;
-                            itemSql = UtilMethods.ReplaceSqlParameter(itemSql, itemParameter, newName);
+                            if (repeatCount>500||(isParameterNameRepeat&& repeatList.Any(it=>it.Key.EqualCase(itemParameter.ParameterName))))
+                            {
+                                itemSql = UtilMethods.ReplaceSqlParameter(itemSql, itemParameter, newName);
+                            }
+                            else 
+                            {
+                                parameter.ParameterName = itemParameter.ParameterName;
+                            }
                             addParameters.Add(parameter);
                         }
                         parsmeters.AddRange(addParameters);
@@ -1215,6 +1685,8 @@ namespace SqlSugar
                     }
                 }
                 this.Queues.Clear();
+                var builder = InstanceFactory.GetSqlbuilder(this.Context.CurrentConnectionConfig);
+                builder.FormatSaveQueueSql(sqlBuilder);
                 var result = func(sqlBuilder.ToString(), parsmeters);
                 if (isTran) this.Ado.CommitTran();
                 return result;
@@ -1247,14 +1719,25 @@ namespace SqlSugar
         #region Split table
         public SplitTableContext SplitHelper<T>() where T : class, new()
         {
+            UtilMethods.StartCustomSplitTable(this, typeof(T));
             var result = new SplitTableContext(this.Context)
             {
                 EntityInfo = this.Context.EntityMaintenance.GetEntityInfo<T>()
             };
             return result;
         }
+        public SplitTableContext SplitHelper(Type entityType)  
+        {
+            UtilMethods.StartCustomSplitTable(this,entityType);
+            var result = new SplitTableContext(this.Context)
+            {
+                EntityInfo = this.Context.EntityMaintenance.GetEntityInfo(entityType)
+            };
+            return result;
+        }
         public SplitTableContextResult<T> SplitHelper<T>(T data) where T : class, new()
         {
+            UtilMethods.StartCustomSplitTable(this, typeof(T));
             var result = new SplitTableContext(this.Context)
             {
                 EntityInfo = this.Context.EntityMaintenance.GetEntityInfo<T>()
@@ -1267,6 +1750,7 @@ namespace SqlSugar
         }
         public SplitTableContextResult<T> SplitHelper<T>(List<T> data) where T : class, new()
         {
+            UtilMethods.StartCustomSplitTable(this, typeof(T));
             var result = new SplitTableContext(this.Context)
             {
                 EntityInfo = this.Context.EntityMaintenance.GetEntityInfo<T>()
@@ -1282,8 +1766,15 @@ namespace SqlSugar
         #region AsTenant
         public ITenant AsTenant()
         {
-            Check.Exception(true,ErrorMessage.GetThrowMessage("Child objects do not support tenant methods, var childDb= Db.GetConnection(confid)  ,Db is master  ", "Db子对象不支持租户方法，请使用主对象,例如：var childDb= Db.GetConnection(confid)  Db是主对象，childDb是子对象 "));
-            return null;
+            if (this.Root != null)
+            {
+                return this.Root;
+            }
+            else
+            {
+                Check.Exception(true, ErrorMessage.GetThrowMessage("Child objects do not support tenant methods, var childDb= Db.GetConnection(confid)  ,Db is master  ", "Db子对象不支持租户方法，请使用主对象,例如：var childDb= Db.GetConnection(confid)  Db是主对象，childDb是子对象 "));
+                return null;
+            }
         }
 
         #endregion
@@ -1295,40 +1786,73 @@ namespace SqlSugar
         }
         #endregion
 
-        #region
+        #region Other
+        public Task<SugarAsyncLock> AsyncLock(int timeOutSeconds = 30)
+        {
+            var result = new SugarAsyncLock(this);
+            return result.AsyncLock(timeOutSeconds);
+        }
+        public DynamicBuilder DynamicBuilder() 
+        {
+            return new DynamicBuilder(this.Context);
+        }
+        public void Tracking<T>(T data) where T : class, new()
+        {
+            if (data != null)
+            {
+                UtilMethods.IsNullReturnNew(this.TempItems);
+                var key = "Tracking_" + data.GetHashCode() + "";
+                if (!this.TempItems.ContainsKey(key))
+                {
+                    var newT = new T();
+                    FastCopy.Copy(data, newT);
+                    this.TempItems.Add(key, newT);
+                }
+            }
+        }
+        public void ClearTracking() 
+        {
+            if (this.Context.TempItems != null)
+            {
+                var removeKeys = this.Context.TempItems.Where(it => it.Key.StartsWith("Tracking_") || it.Key.StartsWith("OldData_")).Select(it => it.Key).ToList();
+                foreach (string key in removeKeys)
+                {
+                    this.Context.TempItems.Remove(key);
+                } 
+            }
+        }
+        public void Tracking<T>(List<T> datas) where T : class, new()
+        {
+            foreach (var data in datas) 
+            {
+                this.Tracking(data);
+            } 
+            if (datas != null)
+            {
+                Check.ExceptionEasy(this.Context.TempItems.ContainsKey("OldData_" + datas.GetHashCode()), "The object already has a trace", "对象已存在跟踪,如果要在跟踪可以先清除 db.ClearTracking() ");
+                this.Context.TempItems.Add("OldData_" + datas.GetHashCode(), datas.Cast<T>().ToList());
+            }
+        }
+        public SqlSugarClient CopyNew()
+        {
+            var result= new SqlSugarClient(UtilMethods.CopyConfig(this.Ado.Context.CurrentConnectionConfig));
+            result.QueryFilter = this.QueryFilter;
+            return result;
+        }
         public void ThenMapper<T>(IEnumerable<T> list, Action<T> action)
         {
-            MapperContext<T> result = new MapperContext<T>();
-            result.context = this.Context;
-            if (result.context.TempItems == null)
+            this.Context.Utilities.PageEach(list, 200, pageList =>
             {
-                result.context.TempItems = new Dictionary<string, object>();
-            }
-            var key = "Queryable_To_Context";
-            result.context.TempItems.Add(key, result);
-            result.list = list.ToList();
-            foreach (var item in list)
-            {
-                action.Invoke(item);
-            }
-            result.context.TempItems.Remove(key);
+                _ThenMapper(pageList, action);
+            });
         }
+
         public async Task ThenMapperAsync<T>(IEnumerable<T> list, Func<T, Task> action)
         {
-            MapperContext<T> result = new MapperContext<T>();
-            result.context = this.Context;
-            if (result.context.TempItems == null)
+            await this.Context.Utilities.PageEachAsync(list, 200,async pageList =>
             {
-                result.context.TempItems = new Dictionary<string, object>();
-            }
-            var key = "Queryable_To_Context";
-            result.context.TempItems.Add(key, result);
-            result.list = list.ToList();
-            foreach (var item in list)
-            {
-                await action.Invoke(item);
-            }
-            result.context.TempItems.Remove(key);
+                await _ThenMapperAsync(pageList, action);
+            });
         }
         #endregion
     }

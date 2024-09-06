@@ -6,6 +6,7 @@ using System.Text;
 
 namespace SqlSugar
 {
+ 
     public class JoinQueryInfo
     {
         public JoinType JoinType { get; set; }
@@ -13,6 +14,7 @@ namespace SqlSugar
         public string ShortName { get; set; }
         public int JoinIndex { get; set; }
         public string JoinWhere { get; set; }
+        public Type EntityType { get;  set; }
     }
     public class JoinQueryInfos
     {

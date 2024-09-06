@@ -8,7 +8,7 @@ namespace SqlSugar
     public abstract partial class SqlBuilderProvider : SqlBuilderAccessory, ISqlBuilder
     {
         #region  Variable
-        private string[] SqlSplicingOperator = new string[] { ">", ">=", "<", "<=", "(", ")", "=", "||", "&&","&","|" }; 
+        private string[] SqlSplicingOperator = new string[] { ">", ">=", "<", "<=", "(", ")", "!=", "<>", "not", "=", "||", "&&", "&", "|", "null", "is", "isnot", "like", "nolike", "+", "-", "*", "/", "%" , "$casewhen", "$then", "$when", "$else", "$end" };
         #endregion
 
         #region Root
@@ -19,7 +19,7 @@ namespace SqlSugar
             {
                 return GetSqlSplicingOperator(value);
             }
-            else  if (IsString(value))
+            else if (IsString(value))
             {
                 return GetSqlPartByString(value, pars);
             }
@@ -43,9 +43,15 @@ namespace SqlSugar
 
         private static string GetSqlSplicingOperator(object value)
         {
-            var result= value.ObjToString();
-            if (result == "||") return "AND";
-            else if (result == "&&") return "OR";
+            var result = value.ObjToString();
+            if (result == "||") return "OR";
+            else if (result == "&&") return "AND";
+            else if (result.EqualCase("isnot")) return " IS NOT ";
+            else if (result.EqualCase("$casewhen")) return " CASE WHEN ";
+            else if (result.EqualCase("$then")) return " THEN ";
+            else if (result.EqualCase("$when")) return " WHEN ";
+            else if (result.EqualCase("$else")) return " ELSE ";
+            else if (result.EqualCase("$end")) return " END ";
             return result;
         }
         private static string GetSqlPartError(object value)
@@ -82,7 +88,7 @@ namespace SqlSugar
             }
             else
             {
-                return this.GetTranslationColumnName(value.ObjToString());
+                return this.GetTranslationColumnName(value.ObjToString().ToCheckField());
             }
         }
         #endregion
@@ -103,7 +109,7 @@ namespace SqlSugar
             }
             return parvalue;
         }
-        private  string GetParameterName(List<SugarParameter> pars, string valueString)
+        private string GetParameterName(List<SugarParameter> pars, string valueString)
         {
             object parvalue = Json2SqlHelper.GetValue(valueString);
             SugarParameter parameter = new SugarParameter("@p" + pars.Count(), parvalue);
@@ -112,12 +118,16 @@ namespace SqlSugar
             var parname = GetParameterName(pars, parvalue);
             return parname;
         }
+        internal int GetParameterNameIndex = 100;
 
-        private static string GetParameterName(List<SugarParameter> pars, object parvalue)
+        private string GetParameterName(List<SugarParameter> pars, object parvalue)
         {
-            var parname = "@p" + pars.Count();
+            var parname = "@p" + pars.Count() + "_" + (GetParameterNameIndex) + $"{this.QueryBuilder?.LambdaExpressions?.ParameterIndex}";
             SugarParameter parameter = new SugarParameter(parname, parvalue);
             pars.Add(parameter);
+            GetParameterNameIndex++;
+            if (this.QueryBuilder != null)
+                this.QueryBuilder.LambdaExpressions.ParameterIndex++;
             return parname;
         }
         #endregion

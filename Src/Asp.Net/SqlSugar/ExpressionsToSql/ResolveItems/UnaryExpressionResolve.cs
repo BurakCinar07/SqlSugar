@@ -99,7 +99,14 @@ namespace SqlSugar
                       methodParamter
                   }
                     });
-                    this.Context.Result.Append(result);
+                    if (nodeType == ExpressionType.Not&& memberExpression.Member.Name=="HasValue")
+                    {
+                        this.Context.Result.Append("NOT" + result  );
+                    }
+                    else
+                    {
+                        this.Context.Result.Append(result);
+                    }
                     parameter.CommonTempData = null;
                 }
             }
@@ -121,6 +128,8 @@ namespace SqlSugar
                 AppendNot(parameter.CommonTempData);
             base.Start();
             parameter.BaseParameter.CommonTempData = parameter.CommonTempData;
+            if (nodeType == ExpressionType.Negate&& parameter.BaseParameter.CommonTempData is int)
+                parameter.BaseParameter.CommonTempData =Convert.ToInt32(parameter.BaseParameter.CommonTempData)*-1;
             parameter.BaseParameter.ChildExpression = base.Expression;
             parameter.CommonTempData = null;
         }

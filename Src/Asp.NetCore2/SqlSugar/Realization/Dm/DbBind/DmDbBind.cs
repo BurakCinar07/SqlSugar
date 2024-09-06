@@ -18,6 +18,8 @@ namespace SqlSugar
                 csharpTypeName = "long";
             if (csharpTypeName.ToLower().IsIn("boolean", "bool"))
                 csharpTypeName = "bool";
+            if (csharpTypeName == "Guid")
+                csharpTypeName = "string";
             if (csharpTypeName == "DateTimeOffset")
                 csharpTypeName = "DateTime";
             var mappings = this.MappingTypes.Where(it => it.Value.ToString().Equals(csharpTypeName, StringComparison.CurrentCultureIgnoreCase));
@@ -42,6 +44,10 @@ namespace SqlSugar
             else if (propertyTypes == null)
             {
                 return "other";
+            }
+            else if (dbTypeName == "sbyte")
+            {
+                return "byte";
             }
             else if (dbTypeName == "xml" || dbTypeName == "string")
             {
@@ -88,19 +94,24 @@ namespace SqlSugar
                   new KeyValuePair<string, CSharpDataType>("smallint",CSharpDataType.@short),
                   new KeyValuePair<string, CSharpDataType>("integer",CSharpDataType.@int),
                   new KeyValuePair<string, CSharpDataType>("interval year to  month",CSharpDataType.@int),
-                  new KeyValuePair<string, CSharpDataType>("interval day to  second",CSharpDataType.@int),
+                  new KeyValuePair<string, CSharpDataType>("interval day to second",CSharpDataType.TimeSpan),
+                  new KeyValuePair<string, CSharpDataType>("intervalds",CSharpDataType.TimeSpan),
 
                   new KeyValuePair<string, CSharpDataType>("number",CSharpDataType.@int),
                   new KeyValuePair<string, CSharpDataType>("number",CSharpDataType.@float),
                   new KeyValuePair<string, CSharpDataType>("number",CSharpDataType.@short),
                   new KeyValuePair<string, CSharpDataType>("number",CSharpDataType.@byte),
                   new KeyValuePair<string, CSharpDataType>("number",CSharpDataType.@double),
+                  new KeyValuePair<string, CSharpDataType>("binaryfloat",CSharpDataType.@float),
+                  new KeyValuePair<string, CSharpDataType>("binarydouble",CSharpDataType.@double),
                   new KeyValuePair<string, CSharpDataType>("number",CSharpDataType.@long),
                   new KeyValuePair<string, CSharpDataType>("number",CSharpDataType.@bool),
-                  new KeyValuePair<string, CSharpDataType>("bit",CSharpDataType.@bool),
-                  new KeyValuePair<string, CSharpDataType>("number",CSharpDataType.@decimal),
-                  new KeyValuePair<string, CSharpDataType>("number",CSharpDataType.Single),
+                  new KeyValuePair<string, CSharpDataType>("boolean",CSharpDataType.@bool),
+                  new KeyValuePair<string, CSharpDataType>("bit",CSharpDataType.@bool), 
                   new KeyValuePair<string, CSharpDataType>("decimal",CSharpDataType.@decimal),
+                  new KeyValuePair<string, CSharpDataType>("number",CSharpDataType.@decimal),
+                  new KeyValuePair<string, CSharpDataType>("numeric",CSharpDataType.@decimal),
+                  new KeyValuePair<string, CSharpDataType>("number",CSharpDataType.Single),
                   new KeyValuePair<string, CSharpDataType>("decimal",CSharpDataType.Single),
                   new KeyValuePair<string, CSharpDataType>("dec",CSharpDataType.@decimal),
                   new KeyValuePair<string, SqlSugar.CSharpDataType>("double precision",CSharpDataType.@double),
@@ -122,15 +133,26 @@ namespace SqlSugar
                   new KeyValuePair<string, CSharpDataType>("nclob",CSharpDataType.@string),
                   new KeyValuePair<string, CSharpDataType>("rowid",CSharpDataType.@string),
 
-                  new KeyValuePair<string, CSharpDataType>("date",CSharpDataType.DateTime),
                   new KeyValuePair<string, CSharpDataType>("timestamp",CSharpDataType.DateTime),
+                  new KeyValuePair<string, CSharpDataType>("date",CSharpDataType.DateTime),
+                 
                   new KeyValuePair<string, CSharpDataType>("timestamp with local time zone",CSharpDataType.DateTime),
                   new KeyValuePair<string, CSharpDataType>("timestamp with time zone",CSharpDataType.DateTime),
                   new KeyValuePair<string, CSharpDataType>("timestamp with time zone",CSharpDataType.DateTime),
 
+
+
+                  new KeyValuePair<string, CSharpDataType>("timestamp with local time zone",CSharpDataType.DateTimeOffset),
+                  new KeyValuePair<string, CSharpDataType>("timestamp with time zone",CSharpDataType.DateTimeOffset),
+                  new KeyValuePair<string, CSharpDataType>("timestamp with time zone",CSharpDataType.DateTimeOffset),
+
+                  new KeyValuePair<string, CSharpDataType>("time",CSharpDataType.TimeSpan),
+
                   new KeyValuePair<string, CSharpDataType>("float",CSharpDataType.@decimal),
+                  new KeyValuePair<string, CSharpDataType>("real",CSharpDataType.@float),
 
                   new KeyValuePair<string, CSharpDataType>("blob",CSharpDataType.byteArray),
+                  new KeyValuePair<string, CSharpDataType>("image",CSharpDataType.byteArray),
                   new KeyValuePair<string, CSharpDataType>("long raw",CSharpDataType.byteArray),
                   new KeyValuePair<string, CSharpDataType>("raw",CSharpDataType.byteArray),
                   new KeyValuePair<string, CSharpDataType>("bfile",CSharpDataType.byteArray),

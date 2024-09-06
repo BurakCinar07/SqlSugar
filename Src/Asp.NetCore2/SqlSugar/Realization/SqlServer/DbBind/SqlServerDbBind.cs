@@ -6,6 +6,17 @@ namespace SqlSugar
 {
     public class SqlServerDbBind : DbBindProvider
     {
+        public override string GetDbTypeName(string csharpTypeName)
+        {
+            if (csharpTypeName == nameof(DateTimeOffset))
+            {
+                return nameof(DateTimeOffset);
+            }
+            else
+            {
+                return base.GetDbTypeName(csharpTypeName);
+            }
+        }
         public override List<KeyValuePair<string, CSharpDataType>> MappingTypes
         {
             get
@@ -27,6 +38,7 @@ namespace SqlSugar
                   new KeyValuePair<string, CSharpDataType>("varchar",CSharpDataType.@string),
                   new KeyValuePair<string, CSharpDataType>("nvarchar",CSharpDataType.@string),
                   new KeyValuePair<string, CSharpDataType>("sql_variant",CSharpDataType.@string),
+                  new KeyValuePair<string, CSharpDataType>("varcharmax",CSharpDataType.@string),
                   new KeyValuePair<string, CSharpDataType>("text",CSharpDataType.@string),
                   new KeyValuePair<string, CSharpDataType>("char",CSharpDataType.@string),
                   new KeyValuePair<string, CSharpDataType>("ntext",CSharpDataType.@string),
@@ -51,8 +63,8 @@ namespace SqlSugar
                   new KeyValuePair<string, CSharpDataType>("smallint",CSharpDataType.@short),
                   new KeyValuePair<string, CSharpDataType>("tinyint",CSharpDataType.@byte),
                   new KeyValuePair<string, CSharpDataType>("uniqueidentifier",CSharpDataType.Guid),
-                  new KeyValuePair<string, CSharpDataType>("binary",CSharpDataType.byteArray),
                   new KeyValuePair<string, CSharpDataType>("image",CSharpDataType.byteArray),
+                  new KeyValuePair<string, CSharpDataType>("binary",CSharpDataType.byteArray),
                   new KeyValuePair<string, CSharpDataType>("varbinary",CSharpDataType.byteArray),
                   new KeyValuePair<string, CSharpDataType>("datetimeoffset", CSharpDataType.DateTimeOffset),
                   new KeyValuePair<string, CSharpDataType>("datetimeoffset", CSharpDataType.DateTime)};

@@ -6,16 +6,29 @@ using System.Text;
 using System.Threading.Tasks;
 namespace SqlSugar
 {
-    
+
     public class InstanceFactory
     {
         static Assembly assembly = Assembly.GetExecutingAssembly();
         static Dictionary<string, Type> typeCache = new Dictionary<string, Type>();
-        public static string CustomDllName = "";
+        private static string _CustomDllName = "";
+        private static List<string> CustomDlls = new List<string>();
+        public static Assembly[] CustomAssemblies = new Assembly[]{};
+        public static string CustomDllName {
+            get { return _CustomDllName; }
+            set 
+            {
+                if (!CustomDlls.Contains(value)) 
+                {
+                    CustomDlls.Add(value);
+                }
+                _CustomDllName = value;
+            }
+        }
         public static string CustomDbName = "";
         public static string CustomNamespace = "";
         public static bool NoCache = false;
-
+        public static bool IsWebFrom = false;
         public static void RemoveCache()
         {
             typeCache = new Dictionary<string, Type>();
@@ -141,6 +154,27 @@ namespace SqlSugar
 
         #endregion
 
+        public static QueryBuilder GetQueryBuilderWithContext(ISqlSugarClient db)
+        {
+            if (db is SqlSugarClient)
+            {
+                db = (db as SqlSugarClient).Context;
+            }
+            else if (db is SqlSugarScope)
+            {
+                db = (db as SqlSugarScope).ScopedContext.Context;
+            }
+            if (!(db is SqlSugarProvider)) 
+            {
+                db = new SqlSugarClient(db.CurrentConnectionConfig).Context;
+            }
+            var QueryBuilder = InstanceFactory.GetQueryBuilder(db.CurrentConnectionConfig);
+            QueryBuilder.Context = (SqlSugarProvider)db;
+            QueryBuilder.Builder = InstanceFactory.GetSqlbuilder(db.CurrentConnectionConfig);
+            QueryBuilder.Builder.Context = (SqlSugarProvider)db;
+            return QueryBuilder;
+        }
+
         public static QueryBuilder GetQueryBuilder(ConnectionConfig currentConnectionConfig)
         {
             if (currentConnectionConfig.DbType == DbType.SqlServer)
@@ -189,7 +223,11 @@ namespace SqlSugar
                 return result;
             }
         }
-
+        public static ISqlBuilder GetSqlBuilderWithContext(ISqlSugarClient db) 
+        {
+           var result= GetQueryBuilderWithContext(db).Builder;
+            return result;
+        }
         public static ISqlBuilder GetSqlbuilder(ConnectionConfig currentConnectionConfig)
         {
             if (currentConnectionConfig.DbType == DbType.SqlServer)
@@ -213,6 +251,22 @@ namespace SqlSugar
             {
                 return new OracleUpdateable<T>();
             }
+            else if (IsCustomDb(currentConnectionConfig))
+            {
+                var name =
+                    "SqlSugar." + currentConnectionConfig.DbType +
+                    "." + currentConnectionConfig.DbType
+                    + "Updateable`1";
+                var type = GetCustomTypeByClass<T>(name);
+                if (type == null)
+                {
+                    return new UpdateableProvider<T>();
+                }
+                else
+                {
+                    return (UpdateableProvider<T>)Activator.CreateInstance(type, true);
+                }
+            }
             else
             {
                 return new UpdateableProvider<T>();
@@ -224,6 +278,22 @@ namespace SqlSugar
             if (currentConnectionConfig.DbType == DbType.Oracle)
             {
                 return new OracleDeleteable<T>();
+            }
+            else if (IsCustomDb(currentConnectionConfig))
+            {
+                var name =
+                    "SqlSugar." + currentConnectionConfig.DbType +
+                    "." + currentConnectionConfig.DbType
+                    + "Deleteable`1";
+                var type = GetCustomTypeByClass<T>(name);
+                if (type == null)
+                {
+                    return new DeleteableProvider<T>();
+                }
+                else
+                {
+                    return (DeleteableProvider<T>)Activator.CreateInstance(type, true);
+                }
             }
             else
             {
@@ -249,10 +319,43 @@ namespace SqlSugar
             {
                 return new KdbndpInserttable<T>();
             }
+            else if (IsCustomDb(currentConnectionConfig))
+            {
+                var name =
+                    "SqlSugar." + currentConnectionConfig.DbType +
+                    "." + currentConnectionConfig.DbType
+                    + "Insertable`1";
+                var type = GetCustomTypeByClass<T>(name);
+                if (type == null)
+                {
+                    return new InsertableProvider<T>();
+                }
+                else
+                {
+                    return (InsertableProvider<T>)Activator.CreateInstance(type, true);
+                }
+            }
             else
             {
                 return new InsertableProvider<T>();
             }
+        }
+
+        private static bool IsCustomDb(ConnectionConfig currentConnectionConfig)
+        {
+            return
+                            currentConnectionConfig.DbType != DbType.SqlServer &&
+                            currentConnectionConfig.DbType != DbType.Dm &&
+                            currentConnectionConfig.DbType != DbType.Oscar &&
+                            currentConnectionConfig.DbType != DbType.Access &&
+                            currentConnectionConfig.DbType != DbType.QuestDB &&
+                            currentConnectionConfig.DbType != DbType.MySql &&
+                            currentConnectionConfig.DbType != DbType.Oracle &&
+                            currentConnectionConfig.DbType != DbType.PostgreSQL &&
+                            currentConnectionConfig.DbType != DbType.ClickHouse &&
+                            currentConnectionConfig.DbType != DbType.GBase &&
+                            currentConnectionConfig.DbType != DbType.Sqlite &&
+                            GetCustomTypeByClass("SqlSugar." + currentConnectionConfig.DbType + "." + currentConnectionConfig.DbType + "Provider") != null;
         }
 
         public static IDbBind GetDbBind(ConnectionConfig currentConnectionConfig)
@@ -312,6 +415,18 @@ namespace SqlSugar
             else if (type == "Access")
             {
                 return "SqlSugar.Access.Access" + name;
+            }
+            else if (type == "ClickHouse")
+            {
+                return "SqlSugar.ClickHouse.ClickHouse" + name;
+            }
+            else if (type == "GBase")
+            {
+                return "SqlSugar.GBase.GBase" + name;
+            }
+            else if (type == "Odbc")
+            {
+                return "SqlSugar.Odbc.Odbc" + name;
             }
             else if (type == "Custom")
             {
@@ -403,7 +518,7 @@ namespace SqlSugar
         private static Restult GetCacheInstance<Restult>(string className, Type[] types)
         {
             var cacheKey = className + string.Join(",", types.Select(it => it.FullName));
-            Type type;
+            Type type=null;
             if (typeCache.ContainsKey(cacheKey))
             {
                 type = typeCache[cacheKey];
@@ -418,7 +533,11 @@ namespace SqlSugar
                     }
                     else 
                     {
-                        type = GetCustomTypeByClass(className + "`" + types.Length).MakeGenericType(types);
+                        var custom = GetCustomTypeByClass(className + "`" + types.Length);
+                        if (custom != null)
+                        {
+                            type = custom.MakeGenericType(types);
+                        }
                         if (type == null) 
                         {
                             type = Type.GetType(className + "`" + types.Length, true).MakeGenericType(types);
@@ -444,10 +563,18 @@ namespace SqlSugar
             }
             else 
             {
-                type = GetCustomTypeByClass(className + "`" + types.Length).MakeGenericType(types);
+                var custom = GetCustomTypeByClass(className + "`" + types.Length);
+                if (custom != null) 
+                {
+                    type = custom.MakeGenericType(types);
+                }
                 if (type == null) 
                 {
-                    type = Type.GetType(className + "`" + types.Length, true).MakeGenericType(types);
+                    type = Type.GetType(className + "`" + types.Length)?.MakeGenericType(types);
+                    if (type == null) 
+                    {
+                        type = GetCustomDbType(className + "`" + types.Length, type).MakeGenericType(types);
+                    }
                 }
             }
             var result = (Restult)Activator.CreateInstance(type, true);
@@ -517,20 +644,65 @@ namespace SqlSugar
             {
                 type = GetCustomTypeByClass(className);
             }
+            if (type == null)
+            {
+                type = GetCustomDbType(className, type);
+            }
             var result = (T)Activator.CreateInstance(type, true);
             return result;
         }
 
+        private static Type GetCustomDbType(string className, Type type)
+        {
+            if (className.Replace(".", "").Length + 1 == className.Length)
+            {
+                var array = className.Split('.');
+                foreach (var item in UtilMethods.EnumToDictionary<DbType>())
+                {
+                    if (array.Last().StartsWith(item.Value.ToString()))
+                    {
+
+                        var newName = array.First() + "." + item.Value.ToString() + "." + array.Last();
+                        type = GetCustomTypeByClass(newName);
+                        break;
+                    }
+                }
+
+            }
+
+            return type;
+        }
+
         internal static Type GetCustomTypeByClass(string className)
         {
-            var key = "Assembly_"+ CustomDllName+assembly.GetHashCode();
+            Type type = null;
+            foreach (var item in CustomDlls.ToArray())
+            {
+                if (type == null)
+                {
+                    type = GetCustomTypeByClass(className, item);
+                }
+                if(type != null) 
+                {
+                    break;
+                }
+            }
+            return type;
+        }
+        internal static Type GetCustomTypeByClass(string className,string customDllName)
+        {
+            var key = "Assembly_" + customDllName + assembly.GetHashCode();
             var newAssembly = new ReflectionInoCacheService().GetOrCreate<Assembly>(key, () => {
                 try
                 {
+                    if (CustomAssemblies?.Any(it => it.FullName.StartsWith(customDllName))==true) 
+                    {
+                        return CustomAssemblies?.First(it => it.FullName.StartsWith(customDllName));
+                    }
                     var path = Assembly.GetExecutingAssembly().Location;
                     if (path.HasValue())
                     {
-                        path =System.IO.Path.Combine( System.IO.Path.GetDirectoryName(path), CustomDllName + ".dll");
+                        path = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path), customDllName + ".dll");
                     }
                     if (path.HasValue() && FileHelper.IsExistFile(path))
                     {
@@ -538,17 +710,83 @@ namespace SqlSugar
                     }
                     else
                     {
-                        return Assembly.LoadFrom(CustomDllName + ".dll");
+                        if (IsWebFrom)
+                        {
+                            string newpath = (System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().GetName().CodeBase) + "\\" + customDllName + ".dll").Replace("file:\\", "");
+                            return Assembly.LoadFrom(newpath);
+                        }
+                        return Assembly.LoadFrom(customDllName + ".dll");
                     }
                 }
-                catch 
+                catch
                 {
-                    var message = "Not Found " + CustomDllName + ".dll";
+                    var message = "Not Found " + customDllName + ".dll";
                     Check.Exception(true, message);
                     return null;
                 }
             });
             Type type = newAssembly.GetType(className);
+            if (type == null)
+            {
+                type = assembly.GetType(className);
+            }
+            return type;
+        }
+        internal static Type GetCustomTypeByClass<T>(string className)
+        {
+            Type type = null;
+            foreach (var item in CustomDlls.ToArray())
+            {
+                if (type == null)
+                {
+                    type = GetCustomTypeByClass<T>(className, item);
+                }
+                if (type != null)
+                {
+                    break;
+                }
+            }
+            return type;
+        }
+        internal static Type GetCustomTypeByClass<T>(string className,string customDllName)
+        {
+            var key = "Assembly_" + customDllName + assembly.GetHashCode();
+            var newAssembly = new ReflectionInoCacheService().GetOrCreate<Assembly>(key, () => {
+                try
+                {
+                    if (CustomAssemblies?.Any(it => it.FullName.StartsWith(customDllName)) == true)
+                    {
+                        return CustomAssemblies?.First(it => it.FullName.StartsWith(customDllName));
+                    }
+                    var path = Assembly.GetExecutingAssembly().Location;
+                    if (path.HasValue())
+                    {
+                        path = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path), customDllName + ".dll");
+                    }
+                    if (path.HasValue() && FileHelper.IsExistFile(path))
+                    {
+                        return Assembly.LoadFrom(path);
+                    }
+                    else
+                    {
+                        if (IsWebFrom)
+                        {
+                            string newpath = (System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().GetName().CodeBase) + "\\" + customDllName + ".dll").Replace("file:\\", "");
+                            return Assembly.LoadFrom(newpath);
+                        }
+                        return Assembly.LoadFrom(customDllName + ".dll");
+                    }
+                }
+                catch
+                {
+                    var message = "Not Found " + customDllName + ".dll";
+                    Check.Exception(true, message);
+                    return null;
+                }
+            });
+            Type typeArgument = typeof(T); 
+            string fullTypeName = className + "[[" + typeArgument.FullName+","+ typeArgument.Assembly.FullName+ "]]";
+            Type type = newAssembly.GetType(fullTypeName);
             return type;
         }
         #endregion

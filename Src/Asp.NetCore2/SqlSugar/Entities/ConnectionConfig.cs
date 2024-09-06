@@ -13,7 +13,7 @@ namespace SqlSugar
         /// <summary>
         ///Connection unique code
         /// </summary>
-        public dynamic ConfigId { get; set; }
+        public object ConfigId { get; set; }
         /// <summary>
         ///DbType.SqlServer Or Other
         /// </summary>
@@ -22,6 +22,10 @@ namespace SqlSugar
         ///Database Connection string
         /// </summary>
         public string ConnectionString { get; set; }
+        /// <summary>
+        /// QueryableWithAttr queries go to DbLinkName, which is commonly used for cross-library queries
+        /// </summary>
+        public string DbLinkName { get; set; }
         /// <summary>
         /// true does not need to close the connection
         /// </summary>
@@ -88,7 +92,8 @@ namespace SqlSugar
         public Action<string, SugarParameter[]> OnLogExecuted { get; set; }
         public Func<string, SugarParameter[], KeyValuePair<string, SugarParameter[]>> OnExecutingChangeSql { get; set; }
         public  Action<object, DataFilterModel> DataExecuting { get; set; }
-
+        public Action<object, DataFilterModel> DataChangesExecuted { get; set; }
+        public Action<object, DataAfterModel> DataExecuted { get;  set; }
     }
     public class ConfigureExternalServices
     {

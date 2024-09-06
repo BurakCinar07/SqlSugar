@@ -41,8 +41,36 @@ namespace SqlSugar
         {
             var exp = expression as MethodCallExpression;
             var argExp = exp.Arguments[0];
-            var result = "AND " + SubTools.GetMethodValue(this.Context, argExp, ResolveExpressType.WhereMultiple);
+            var copyContext = this.Context;
 
+            var pars = ExpressionTool.GetParameters(expression).Distinct();
+            if (this.Context.JoinIndex > 0|| pars.Count()>1) 
+            {
+                copyContext = this.Context.GetCopyContextWithMapping();
+                copyContext.IsSingle = false;
+            }
+            if (ExpressionTool.GetMethodName(argExp) == "ToExpression")
+            {
+                argExp = ExpressionTool.DynamicInvoke(argExp) as Expression;
+            }
+            var result = "AND " + SubTools.GetMethodValue(copyContext, argExp, ResolveExpressType.WhereMultiple);
+            if (argExp.Type == typeof(List<IConditionalModel>))
+            {
+                var p = this.Context.Parameters.Last();
+                this.Context.Parameters.Remove(p);
+                var cols = p.Value as List<IConditionalModel>;
+                var sqlObj = this.Context.SugarContext.QueryBuilder.Builder.ConditionalModelToSql(cols, this.Context.ParameterIndex * 100);
+                this.Context.ParameterIndex = this.Context.ParameterIndex + this.Context.ParameterIndex * 100;
+                result = "AND " + sqlObj.Key;
+                this.Context.Parameters.AddRange(sqlObj.Value);
+                return result;
+            }
+            if (this.Context.JoinIndex > 0 || pars.Count() > 1)
+            {
+                this.Context.Parameters.AddRange(copyContext.Parameters);
+                this.Context.Index = copyContext.Index;
+                this.Context.ParameterIndex = copyContext.ParameterIndex;
+            }
 
             var regex = @"^AND  (\@Const\d+) $";
             if (this.Context is OracleExpressionContext)
@@ -71,7 +99,11 @@ namespace SqlSugar
             }
 
             var selfParameterName = this.Context.GetTranslationColumnName((argExp as LambdaExpression).Parameters.First().Name) + UtilConstants.Dot;
-            if (this.Context.JoinIndex == 0)
+            if (this.Context.JoinIndex == 0 && result.Contains(" FROM "))
+            {
+                this.Context.CurrentShortName = selfParameterName.TrimEnd('.');
+            }
+            else  if (this.Context.JoinIndex == 0 && this.Context.CurrentShortName != selfParameterName.TrimEnd('.'))
                 result = result.Replace(selfParameterName, SubTools.GetSubReplace(this.Context));
             return result;
         }

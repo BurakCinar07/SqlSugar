@@ -50,7 +50,7 @@ namespace SqlSugar
         private void AppendTable(JToken item)
         {
             var tableInfo = jsonCommonProvider.GetTableName(item);
-            var tableName = tableInfo.TableName;
+            var tableName = tableInfo.TableName.ToCheckField();
             if (tableInfo.ShortName.HasValue())
             {
                  tableName = tableInfo.ShortName + "." + tableInfo.TableName;
@@ -77,7 +77,11 @@ namespace SqlSugar
 
         public JsonDeleteResult ToResult()
         {
-            throw new NotImplementedException();
+            var result = new JsonDeleteResult();
+            var sqlInfo = this.ToSqlList();
+            var sqlInfoResult = sqlInfo.First();
+            result.UpdateRows = this.context.Ado.ExecuteCommand(sqlInfoResult.Sql, sqlInfoResult.Parameters);
+            return result;
         }
 
         List<string> IJsonProvider<JsonDeleteResult>.ToSqlString()

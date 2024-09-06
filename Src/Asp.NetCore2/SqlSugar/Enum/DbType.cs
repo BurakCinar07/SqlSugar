@@ -18,6 +18,21 @@ namespace SqlSugar
         MySqlConnector,
         Access,
         OpenGauss,
+        QuestDB,
+        HG,
+        ClickHouse,
+        GBase,
+        Odbc,
+        OceanBaseForOracle,
+        TDengine,
+        GaussDB,
+        OceanBase,
+        Tidb,
+        Vastbase,
+        PolarDB,
+        Doris,
+        Xugu,
+        GoldenDB,
         Custom =900
     }
 }

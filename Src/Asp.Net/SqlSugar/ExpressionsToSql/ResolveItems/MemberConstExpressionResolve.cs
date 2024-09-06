@@ -21,27 +21,55 @@ namespace SqlSugar
                 case ResolveExpressType.Update:
                 case ResolveExpressType.SelectSingle:
                 case ResolveExpressType.SelectMultiple:
-                    if (value != null && value.GetType().IsEnum())
-                    {
-                        value = Convert.ToInt64(value);
-                    }
-                    parameter.BaseParameter.CommonTempData = value;
+                    value = Select(parameter, value);
                     break;
                 case ResolveExpressType.WhereSingle:
                 case ResolveExpressType.WhereMultiple:
-                    if (isSetTempData)
-                    {
-                        baseParameter.CommonTempData = value;
-                    }
-                    else
-                    {
-                        AppendValue(parameter, isLeft, value);
-                    }
+                    Where(parameter, isLeft, value, baseParameter, isSetTempData);
                     break;
                 case ResolveExpressType.FieldSingle:
                 case ResolveExpressType.FieldMultiple:
                     break;
             }
+        }
+
+        private void Where(ExpressionParameter parameter, bool? isLeft, object value, ExpressionParameter baseParameter, bool isSetTempData)
+        {
+            if (parameter.OppsiteExpression != null)
+            {
+                var exp = ExpressionTool.RemoveConvert(parameter.OppsiteExpression);
+                value = GetMemberValue(value, exp);
+                var valueFullName = value?.GetType()?.FullName;
+                if (valueFullName == "Microsoft.Extensions.Primitives.StringValues")
+                {
+                    value = value.ToString();
+                }
+            }
+            if (isSetTempData)
+            {
+                baseParameter.CommonTempData = value;
+            }
+            else
+            {
+                AppendValue(parameter, isLeft, value);
+            }
+        }
+  
+        private  object Select(ExpressionParameter parameter, object value)
+        {
+            if (value != null && value.GetType().IsEnum())
+            {
+                if (this.Context?.SugarContext?.Context?.CurrentConnectionConfig?.MoreSettings?.TableEnumIsString == true)
+                {
+                    value = Convert.ToString(value);
+                }
+                else
+                {
+                    value = Convert.ToInt64(value);
+                }
+            }
+            parameter.BaseParameter.CommonTempData = value;
+            return value;
         }
     }
 }

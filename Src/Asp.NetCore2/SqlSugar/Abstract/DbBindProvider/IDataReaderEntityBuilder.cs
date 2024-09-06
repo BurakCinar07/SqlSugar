@@ -6,7 +6,7 @@ using System.Data;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Text.RegularExpressions;
-using System.Xml.Linq;
+using System.Xml.Linq; 
 
 namespace SqlSugar
 {
@@ -68,6 +68,8 @@ namespace SqlSugar
         private static readonly MethodInfo getJson = typeof(IDataRecordExtensions).GetMethod("GetJson");
         private static readonly MethodInfo getArray = typeof(IDataRecordExtensions).GetMethod("GetArray");
         private static readonly MethodInfo getEntity = typeof(IDataRecordExtensions).GetMethod("GetEntity", new Type[] { typeof(SqlSugarProvider) });
+        private static readonly MethodInfo getMyIntNull = typeof(IDataRecordExtensions).GetMethod("GetMyIntNull");
+        private static readonly MethodInfo getMyInt= typeof(IDataRecordExtensions).GetMethod("GetMyInt");
 
         private delegate T Load(IDataRecord dataRecord);
         private Load handler;
@@ -100,14 +102,19 @@ namespace SqlSugar
             new Type[] { typeof(IDataRecord) }, type, true);
             ILGenerator generator = method.GetILGenerator();
             LocalBuilder result = generator.DeclareLocal(type);
-            generator.Emit(OpCodes.Newobj, type.GetConstructor(Type.EmptyTypes));
+            generator.Emit(OpCodes.Newobj, type.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                                 null, Type.EmptyTypes, null));
             generator.Emit(OpCodes.Stloc, result);
             this.Context.InitMappingInfo(type);
-            var columnInfos = this.Context.EntityMaintenance.GetEntityInfo(type).Columns;
+            var columnInfos = this.Context.EntityMaintenance.GetEntityInfoWithAttr(type).Columns;
             foreach (var columnInfo in columnInfos)
             {
                 string fileName = columnInfo.DbColumnName ?? columnInfo.PropertyName;
                 if (columnInfo.IsIgnore && !this.ReaderKeys.Any(it => it.Equals(fileName, StringComparison.CurrentCultureIgnoreCase)))
+                {
+                    continue;
+                }
+                else if (columnInfo.ForOwnsOnePropertyInfo!=null) 
                 {
                     continue;
                 }
@@ -119,6 +126,10 @@ namespace SqlSugar
                         if (this.ReaderKeys.Any(it => it.Equals(fileName, StringComparison.CurrentCultureIgnoreCase)))
                         {
                             BindClass(generator, result, columnInfo, ReaderKeys.First(it => it.Equals(fileName, StringComparison.CurrentCultureIgnoreCase)));
+                        }
+                        else if (this.ReaderKeys.Any(it => it.Equals(columnInfo.PropertyName, StringComparison.CurrentCultureIgnoreCase)))
+                        {
+                            BindClass(generator, result, columnInfo, ReaderKeys.First(it => it.Equals(columnInfo.PropertyName, StringComparison.CurrentCultureIgnoreCase)));
                         }
                     }
                     else if (!isGemo && columnInfo.IsJson && columnInfo.PropertyInfo.PropertyType != UtilConstants.StringType)
@@ -150,8 +161,43 @@ namespace SqlSugar
         #endregion
 
         #region Private methods
+        private void BindCustomFunc(ILGenerator generator, LocalBuilder result, EntityColumnInfo columnInfo, string fieldName) 
+        {
+            int i = DataRecord.GetOrdinal(fieldName);
+            Label endIfLabel = generator.DefineLabel();
+            generator.Emit(OpCodes.Ldarg_0);
+            generator.Emit(OpCodes.Ldc_I4, i);
+            generator.Emit(OpCodes.Callvirt, isDBNullMethod);
+            generator.Emit(OpCodes.Brtrue, endIfLabel);
+            generator.Emit(OpCodes.Ldloc, result);
+            //generator.Emit(OpCodes.Ldarg_0);
+            //generator.Emit(OpCodes.Ldc_I4, i);
+            var method = (columnInfo.SqlParameterDbType as Type).GetMethod("QueryConverter");
+            method = method.MakeGenericMethod(new Type[] { columnInfo.PropertyInfo.PropertyType });
+            Type type = (columnInfo.SqlParameterDbType as Type);
+            //ConstructorInfo info = type.GetConstructor(Type.EmptyTypes);
+            //il.Emit(OpCodes.Newobj, info);
+            generator.Emit(OpCodes.Newobj, type.GetConstructor(Type.EmptyTypes));
+            generator.Emit(OpCodes.Ldarg_0);
+            generator.Emit(OpCodes.Ldc_I4, i);
+            //method = (columnInfo.SqlParameterDbType as Type).GetMethod("QueryConverter");
+            //method = method.MakeGenericMethod(new Type[] { columnInfo.PropertyInfo.PropertyType });
+            if (method.IsVirtual)
+                generator.Emit(OpCodes.Callvirt, method);
+            else
+                generator.Emit(OpCodes.Call, method);
+            generator.Emit(OpCodes.Callvirt, columnInfo.PropertyInfo.GetSetMethod(true));
+            generator.MarkLabel(endIfLabel);
+        }
         private void BindClass(ILGenerator generator, LocalBuilder result, EntityColumnInfo columnInfo, string fieldName)
         {
+
+            if (columnInfo.SqlParameterDbType is Type)
+            {
+                BindCustomFunc(generator, result, columnInfo, fieldName);
+                return;
+            }
+
             if (columnInfo.IsJson)
             {
                 MethodInfo jsonMethod = getJson.MakeGenericMethod(columnInfo.PropertyInfo.PropertyType);
@@ -198,12 +244,22 @@ namespace SqlSugar
                 BindMethod(generator, columnInfo, i);
                 generator.Emit(OpCodes.Callvirt, columnInfo.PropertyInfo.GetSetMethod(true));
                 generator.MarkLabel(endIfLabel);
-            }
+            } 
         }
         private void BindField(ILGenerator generator, LocalBuilder result, EntityColumnInfo columnInfo, string fieldName)
         {
+            if (columnInfo.SqlParameterDbType is Type)
+            {
+                BindCustomFunc(generator,result, columnInfo, fieldName);
+                return;
+            }
             int i = DataRecord.GetOrdinal(fieldName);
             Label endIfLabel = generator.DefineLabel();
+
+            //2023-3-8
+            Label tryStart = generator.BeginExceptionBlock();//begin try
+            //2023-3-8 
+
             generator.Emit(OpCodes.Ldarg_0);
             generator.Emit(OpCodes.Ldc_I4, i);
             generator.Emit(OpCodes.Callvirt, isDBNullMethod);
@@ -214,6 +270,15 @@ namespace SqlSugar
             BindMethod(generator, columnInfo, i);
             generator.Emit(OpCodes.Callvirt, columnInfo.PropertyInfo.GetSetMethod(true));
             generator.MarkLabel(endIfLabel);
+
+            //2023-3-8
+            generator.Emit(OpCodes.Leave, tryStart);//eng try
+            generator.BeginCatchBlock(typeof(Exception));//begin catch
+            generator.Emit(OpCodes.Ldstr, ErrorMessage.GetThrowMessage($"{columnInfo.EntityName} {columnInfo.PropertyName} bind error", $"{columnInfo.PropertyName}绑定到{columnInfo.EntityName}失败,可以试着换一个类型，或者使用ORM自定义类型实现"));//thow message
+            generator.Emit(OpCodes.Newobj, typeof(Exception).GetConstructor(new Type[] { typeof(string) }));
+            generator.Emit(OpCodes.Throw);
+            generator.EndExceptionBlock();
+            //2023-3-8
         }
         private void BindMethod(ILGenerator generator, EntityColumnInfo columnInfo, int ordinal)
         {
@@ -242,6 +307,10 @@ namespace SqlSugar
                 {
                     method = isNullableType ? getConvertInt32 : getInt32;
                 }
+                else if (bindPropertyType == UtilConstants.DateTimeOffsetType&&SugarCompatible.IsFramework)
+                {
+                    method = isNullableType ? getConvertdatetimeoffset : getdatetimeoffset;
+                }
                 else if (bindPropertyType == UtilConstants.ByteType)
                 {
                     method = isNullableType ? getConvertByte : getByte;
@@ -250,7 +319,11 @@ namespace SqlSugar
                 {
                     method = isNullableType ? getOtherNull.MakeGenericMethod(bindPropertyType) : getOther.MakeGenericMethod(bindPropertyType);
                 }
-                else if (dbTypeName.EqualCase("STRING")) 
+                else if (dbTypeName.EqualCase("STRING"))
+                {
+                    method = isNullableType ? getOtherNull.MakeGenericMethod(bindPropertyType) : getOther.MakeGenericMethod(bindPropertyType);
+                }
+                else if (bindPropertyType == UtilConstants.StringType&&validPropertyName == "int") 
                 {
                     method = isNullableType ? getOtherNull.MakeGenericMethod(bindPropertyType) : getOther.MakeGenericMethod(bindPropertyType);
                 }
@@ -262,7 +335,6 @@ namespace SqlSugar
                 {
                     method = isNullableType ? getOtherNull.MakeGenericMethod(bindPropertyType) : getOther.MakeGenericMethod(bindPropertyType);
                 }
-
                 if (method.IsVirtual)
                     generator.Emit(OpCodes.Callvirt, method);
                 else
@@ -287,6 +359,10 @@ namespace SqlSugar
                         method = isNullableType ? getConvertByte : getByte;
                     if (bindProperyTypeName.IsContainsIn("int16"))
                         method = isNullableType ? getConvertInt16 : getInt16;
+                    if (bindProperyTypeName == "uint32"&&this.Context.CurrentConnectionConfig.DbType.IsIn(DbType.MySql,DbType.MySqlConnector))
+                        method = null;
+                    if (bindPropertyType ==UtilConstants.IntType&& this.Context.CurrentConnectionConfig.DbType == DbType.OceanBaseForOracle) 
+                        method = isNullableType ? getMyIntNull : getMyInt;
                     break;
                 case CSharpDataType.@bool:
                     if (bindProperyTypeName == "bool" || bindProperyTypeName == "boolean")
@@ -302,9 +378,17 @@ namespace SqlSugar
                     {
                         method = isNullableType ? getConvertStringGuid : getStringGuid;
                     }
-                    else if (bindProperyTypeName == "xelement") 
+                    else if (bindProperyTypeName == "xelement")
                     {
-                        method =  getXelement;
+                        method = getXelement;
+                    }
+                    else if (dbTypeName == "CHAR" && DataRecord.GetDataTypeName(ordinal) == "CHAR(36)")
+                    {
+                        method = null;
+                    }
+                    else if (bindPropertyType.Name == "Char") 
+                    {
+                        method = null;
                     }
                     break;
                 case CSharpDataType.DateTime:
@@ -339,6 +423,10 @@ namespace SqlSugar
                     if (bindPropertyType == UtilConstants.IntType)
                     {
                         method = isNullableType ? getOtherNull.MakeGenericMethod(bindPropertyType) : getOther.MakeGenericMethod(bindPropertyType);
+                    }
+                    if (bindProperyTypeName == "string") 
+                    {
+                        method = null;
                     }
                     break;
                 case CSharpDataType.Guid:
@@ -384,12 +472,14 @@ namespace SqlSugar
             if (method == null)
                 method = isNullableType ? getOtherNull.MakeGenericMethod(bindPropertyType) : getOther.MakeGenericMethod(bindPropertyType);
 
+
             if (method.IsVirtual)
                 generator.Emit(OpCodes.Callvirt, method);
             else
                 generator.Emit(OpCodes.Call, method);
             #endregion
         }
+
 
         private void CheckType(List<string> invalidTypes, string bindProperyTypeName, string validPropertyType, string propertyName)
         {

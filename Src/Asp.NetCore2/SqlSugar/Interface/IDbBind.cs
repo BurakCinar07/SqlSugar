@@ -9,6 +9,7 @@ namespace SqlSugar
 {
     public partial interface IDbBind
     {
+        QueryBuilder QueryBuilder { get; set; }
         SqlSugarProvider Context { get; set; }
         List<string> GuidThrow { get; }
         List<string> IntThrow { get; }
@@ -21,6 +22,7 @@ namespace SqlSugar
         string GetConvertString(string dbTypeName);
         string GetDbTypeName(string csharpTypeName);
         string GetCsharpTypeName(string dbTypeName);
+        string GetCsharpTypeNameByDbTypeName(string dbTypeName);
         List<KeyValuePair<string, CSharpDataType>> MappingTypes { get; }
         List<T> DataReaderToList<T>(Type type, IDataReader reader);
         Task<List<T>> DataReaderToListAsync<T>(Type entityType, IDataReader dataReader);

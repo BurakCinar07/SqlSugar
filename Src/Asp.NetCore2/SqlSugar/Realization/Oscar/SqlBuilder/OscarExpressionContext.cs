@@ -98,6 +98,10 @@ namespace SqlSugar
     }
     public class OscarLMethod : DefaultDbMethod, IDbMethods
     {
+        public override string CharIndex(MethodCallExpressionModel model)
+        {
+            return string.Format(" (strpos ({1},{0})-1)", model.Args[0].MemberName, model.Args[1].MemberName);
+        }
         public override string IIF(MethodCallExpressionModel model)
         {
             var parameter = model.Args[0];
@@ -115,36 +119,14 @@ namespace SqlSugar
         {
             var parameter = model.Args[0];
             var parameter2 = model.Args[1];
-            var format = "dd";
-            if (parameter2.MemberValue.ObjToString() == DateType.Year.ToString())
+            if (parameter.MemberName != null && parameter.MemberName is DateTime)
             {
-                format = "yyyy";
+                return string.Format(" datepart({0},'{1}') ", parameter2.MemberValue, parameter.MemberName);
             }
-            if (parameter2.MemberValue.ObjToString() == DateType.Month.ToString())
+            else
             {
-                format = "MM";
+                return string.Format(" datepart({0},{1}) ", parameter2.MemberValue, parameter.MemberName);
             }
-            if (parameter2.MemberValue.ObjToString() == DateType.Day.ToString())
-            {
-                format = "dd";
-            }
-            if (parameter2.MemberValue.ObjToString() == DateType.Hour.ToString())
-            {
-                format = "hh";
-            }
-            if (parameter2.MemberValue.ObjToString() == DateType.Minute.ToString())
-            {
-                format = "mm";
-            }
-            if (parameter2.MemberValue.ObjToString() == DateType.Second.ToString())
-            {
-                format = "ss";
-            }
-            if (parameter2.MemberValue.ObjToString() == DateType.Millisecond.ToString())
-            {
-                format = "ss";
-            }
-            return string.Format(" cast( to_char({1},'{0}')as integer ) ", format, parameter.MemberName);
         }
 
         public override string Contains(MethodCallExpressionModel model)
@@ -187,21 +169,7 @@ namespace SqlSugar
         {
             var parameter = model.Args[0];
             return string.Format(" CAST({0} AS timestamp)", parameter.MemberName);
-        }
-        public override string DateAddByType(MethodCallExpressionModel model)
-        {
-            var parameter = model.Args[0];
-            var parameter2 = model.Args[1];
-            var parameter3 = model.Args[2];
-            return string.Format(" ({1} +  ({2}||'{0}')::INTERVAL) ", parameter3.MemberValue, parameter.MemberName, parameter2.MemberName);
-        }
-
-        public override string DateAddDay(MethodCallExpressionModel model)
-        {
-            var parameter = model.Args[0];
-            var parameter2 = model.Args[1];
-            return string.Format(" ({0} + ({1}||'day')::INTERVAL) ", parameter.MemberName, parameter2.MemberName);
-        }
+        }     
 
         public override string ToInt32(MethodCallExpressionModel model)
         {
@@ -218,7 +186,7 @@ namespace SqlSugar
         public override string ToString(MethodCallExpressionModel model)
         {
             var parameter = model.Args[0];
-            return string.Format(" CAST({0} AS VARCHAR)", parameter.MemberName);
+            return string.Format(" CAST({0} AS VARCHAR(1024))", parameter.MemberName);
         }
 
         public override string ToGuid(MethodCallExpressionModel model)
@@ -272,6 +240,13 @@ namespace SqlSugar
         public override string EqualTrue(string fieldName)
         {
             return "( " + fieldName + "=true )";
+        }
+        public override string DateDiff(MethodCallExpressionModel model)
+        {
+            var parameter = model.Args[0];
+            var parameter2 = model.Args[1];
+            var parameter3 = model.Args[2];
+            return string.Format(" DATEDIFF('{0}',{1},{2}) ", parameter.MemberValue?.ToString().ToSqlFilter(), parameter2.MemberName, parameter3.MemberName);
         }
     }
 }

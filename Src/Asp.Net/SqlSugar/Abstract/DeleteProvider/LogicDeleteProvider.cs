@@ -15,6 +15,13 @@ namespace SqlSugar
             ISqlSugarClient db;
             List<SugarParameter> pars;
             string where;
+            var isAutoDelFilter = 
+                DeleteBuilder.Context?.CurrentConnectionConfig?.MoreSettings?.IsAutoDeleteQueryFilter==true&&
+                DeleteBuilder.Context?.CurrentConnectionConfig?.MoreSettings?.IsAutoUpdateQueryFilter == true;
+            if (isAutoDelFilter) 
+            {
+                DeleteBuilder.Context.CurrentConnectionConfig.MoreSettings.IsAutoUpdateQueryFilter = false;
+            }
             LogicFieldName = _ExecuteCommand(LogicFieldName, out db, out where, out pars);
             if (deleteValue == null) 
             {
@@ -29,6 +36,58 @@ namespace SqlSugar
                 updateable.UpdateBuilder.Parameters.AddRange(pars);
             Convert(updateable as UpdateableProvider<T>);
             var result = updateable.Where(where).ExecuteCommand();
+            if (isAutoDelFilter)
+            {
+                DeleteBuilder.Context.CurrentConnectionConfig.MoreSettings.IsAutoUpdateQueryFilter = true;
+            }
+            return result;
+        }
+        public int ExecuteCommand(string LogicFieldName, object deleteValue, string deleteTimeFieldName,string userNameFieldName,object userNameValue)
+        {
+            ISqlSugarClient db;
+            List<SugarParameter> pars;
+            string where;
+            var isAutoDelFilter =
+             DeleteBuilder.Context?.CurrentConnectionConfig?.MoreSettings?.IsAutoDeleteQueryFilter == true &&
+             DeleteBuilder.Context?.CurrentConnectionConfig?.MoreSettings?.IsAutoUpdateQueryFilter == true;
+            if (isAutoDelFilter)
+            {
+                DeleteBuilder.Context.CurrentConnectionConfig.MoreSettings.IsAutoUpdateQueryFilter = false;
+            }
+            LogicFieldName = _ExecuteCommand(LogicFieldName, out db, out where, out pars);
+            var updateable = db.Updateable<T>();
+            updateable.UpdateBuilder.LambdaExpressions.ParameterIndex = 1000;
+            updateable .SetColumns(LogicFieldName, deleteValue);
+            updateable.SetColumns(deleteTimeFieldName, DateTime.Now);
+            updateable.SetColumns(userNameFieldName,userNameValue);
+            if (pars != null)
+                updateable.UpdateBuilder.Parameters.AddRange(pars);
+            Convert(updateable as UpdateableProvider<T>);
+            var result = updateable.Where(where).ExecuteCommand();
+            return result;
+        }
+        public async Task<int> ExecuteCommandAsync(string LogicFieldName, object deleteValue, string deleteTimeFieldName, string userNameFieldName, object userNameValue)
+        {
+            ISqlSugarClient db;
+            List<SugarParameter> pars;
+            string where;
+            var isAutoDelFilter =
+             DeleteBuilder.Context?.CurrentConnectionConfig?.MoreSettings?.IsAutoDeleteQueryFilter == true &&
+             DeleteBuilder.Context?.CurrentConnectionConfig?.MoreSettings?.IsAutoUpdateQueryFilter == true;
+            if (isAutoDelFilter)
+            {
+                DeleteBuilder.Context.CurrentConnectionConfig.MoreSettings.IsAutoUpdateQueryFilter = false;
+            }
+            LogicFieldName = _ExecuteCommand(LogicFieldName, out db, out where, out pars);
+            var updateable = db.Updateable<T>();
+            updateable.UpdateBuilder.LambdaExpressions.ParameterIndex = 1000;
+            updateable.SetColumns(LogicFieldName, deleteValue);
+            updateable.SetColumns(deleteTimeFieldName, DateTime.Now);
+            updateable.SetColumns(userNameFieldName, userNameValue);
+            if (pars != null)
+                updateable.UpdateBuilder.Parameters.AddRange(pars);
+            Convert(updateable as UpdateableProvider<T>);
+            var result =await updateable.Where(where).ExecuteCommandAsync();
             return result;
         }
         public async Task<int> ExecuteCommandAsync(string LogicFieldName = null, object deleteValue = null, string deleteTimeFieldName = null)
@@ -36,6 +95,13 @@ namespace SqlSugar
             ISqlSugarClient db;
             List<SugarParameter> pars;
             string where;
+            var isAutoDelFilter =
+                DeleteBuilder.Context?.CurrentConnectionConfig?.MoreSettings?.IsAutoDeleteQueryFilter == true &&
+                DeleteBuilder.Context?.CurrentConnectionConfig?.MoreSettings?.IsAutoUpdateQueryFilter == true;
+            if (isAutoDelFilter)
+            {
+                DeleteBuilder.Context.CurrentConnectionConfig.MoreSettings.IsAutoUpdateQueryFilter = false;
+            }
             LogicFieldName = _ExecuteCommand(LogicFieldName, out db, out where, out pars);
             if (deleteValue == null)
             {
@@ -50,6 +116,10 @@ namespace SqlSugar
                 updateable.UpdateBuilder.Parameters.AddRange(pars);
             Convert(updateable as UpdateableProvider<T>);
             var result =await updateable.Where(where).ExecuteCommandAsync();
+            if (isAutoDelFilter)
+            {
+                DeleteBuilder.Context.CurrentConnectionConfig.MoreSettings.IsAutoUpdateQueryFilter = true;
+            }
             return result;
         }
 
@@ -65,6 +135,16 @@ namespace SqlSugar
         {
             var entityInfo = Deleteable.EntityInfo;
             db = Deleteable.Context;
+            if (DeleteBuilder.BigDataInValues?.Any() == true)
+            {
+               var sql= db.Queryable<T>().Select("1").AS(nameof(T)).In(DeleteBuilder.BigDataInValues.ToArray()).ToSqlString();
+               var whereIndex = sql.IndexOf("  WHERE ");
+               var whereItem = sql.Substring(whereIndex+7);
+                this.DeleteBuilder.WhereInfos.Add(whereItem);
+            }
+             
+            Check.ExceptionEasy(DeleteBuilder.GetWhereString == null,"Logical Delete requires a Where condition", "逻辑删除需要加Where条件");
+         
             where = DeleteBuilder.GetWhereString.Substring(5);
             pars = DeleteBuilder.Parameters;
             if (LogicFieldName.IsNullOrEmpty())

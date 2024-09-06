@@ -34,6 +34,10 @@ namespace OrmTest
         }
         public static void Init()
         {
+            Unitadfafayyy.Init();
+            UInsert3.Init();
+            Unit001.Init();
+            UnitStorageableBool.Init();
             UCustom03.Init();
             UCustom02.Init();
             UCustom01.Init();

@@ -15,6 +15,7 @@ namespace SqlSugar
         @double,
         @Guid,
         @byte,
+        @sbyte,
         @enum,
         @short,
         @long,
@@ -25,6 +26,7 @@ namespace SqlSugar
         @time,
         @DateTimeOffset,
         @Single,
-	    @TimeSpan
+	    @TimeSpan,
+        @char
     }
 }

@@ -13,25 +13,34 @@ namespace SqlSugar
         {
             get
             {
-                return "SELECT datname FROM sys_database";
+                return "SELECT datname FROM sys_database ";
             }
         }
         protected override string GetColumnInfosByTableNameSql
         {
             get
             {
-                string sql = @"SELECT 
-COLUMN_NAME AS DbColumnName,
-TABLE_NAME AS TableName,
-DATA_TYPE AS DataType,
- case when  DATA_DEFAULT like 'NEXTVAL%'
-                                then true else false end as IsIdentity,
-  case when NULLABLE = 'Y'
-                                then true else false end as IsNullable                                
-FROM
-INFO_SCHEM.ALL_TAB_COLUMNS WHERE upper(TABLE_NAME)=upper('{0}')
- 
-";
+                string sql = @" SELECT 
+                                A.COLUMN_NAME AS DbColumnName,
+                                A.TABLE_NAME AS TableName,
+                                A.DATA_TYPE AS DataType,
+                                 case when  DATA_DEFAULT like 'NEXTVAL%'  then true else false end as IsIdentity,
+                                 case when A.NULLABLE = 'Y'  then true else false end as IsNullable   ,    
+                                 A.DATA_LENGTH AS LENGTH,
+                                 B.COMMENTS AS ColumnDescription,                             
+                                 CASE WHEN K.COLUMN_NAME IS NULL THEN FALSE ELSE TRUE END AS IsPrimarykey,
+                                 DATA_SCALE AS DecimalDigits,
+                                 A.DATA_PRECISION AS  SCALE,
+                                 A.DATA_DEFAULT as DefaultValue
+                                FROM
+                                INFO_SCHEM.ALL_TAB_COLUMNS A
+                                LEFT JOIN INFO_SCHEM.SYS_CLASS T ON T.RELNAME=A.TABLE_NAME
+                                LEFT JOIN INFO_SCHEM.ALL_COL_COMMENTS B  ON A.TABLE_NAME=B.TABLE_NAME AND A.COLUMN_NAME=B.COLUMN_NAME 
+                                LEFT JOIN INFO_SCHEM.SYS_ATTRIBUTE C ON C.ATTNAME=A.COLUMN_NAME AND C.ATTRELID=T.OID
+                                LEFT JOIN INFO_SCHEM.V_SYS_PRIMARY_KEYS K ON A.TABLE_NAME=K.TABLE_NAME AND  K.COLUMN_NAME=A.COLUMN_NAME
+                                WHERE upper(A.TABLE_NAME)=upper('{0}')  
+                                 ORDER BY c.ATTNUM 
+                                ";
                 return sql;
             }
         }
@@ -39,15 +48,10 @@ INFO_SCHEM.ALL_TAB_COLUMNS WHERE upper(TABLE_NAME)=upper('{0}')
         {
             get
             {
-                return @"select cast(relname as varchar(500)) as Name ,
-                        '' AS Description
-                        from sys_class c 
-                        where  relkind = 'r' 
-                        and relname not like 'SYS_%'
-                        and relname not like 'V_SYS_%' 
-                        and relname not like 'sql_%' 
-                        and relname not like 'AQ$%' 
-                        AND relname NOT IN('LOGIN_FORBIDDEN_RULE','DBMS_LOCK_ALLOCATED','DUAL'，'_OBJ_BINLOG_SHOW_EVENTS_','USER_LOGIN_HISTORY','LOGIN_ALLOW_IPLIST')
+                //AND t.relnamespace=1 表空间限制。
+                return @" select cast(relname as varchar(500)) as Name , DESCRIPTION AS Description FROM sys_class  t 
+                        LEFT JOIN sys_description  d ON t.OID=d.OBJOID AND d.OBJSUBID=0 
+                        WHERE  t.relvbase>0 AND t.relkind = 'r' AND t.relnamespace=(SELECT OID FROM  sys_namespace WHERE nspname =USER)
                         order by relname";
             }
         }
@@ -55,16 +59,9 @@ INFO_SCHEM.ALL_TAB_COLUMNS WHERE upper(TABLE_NAME)=upper('{0}')
         {
             get
             {
-                return @"select cast(relname as varchar(500)) as Name ,
-                        '' AS DESCRIPTION 
-                        from sys_class c 
-                        where  relkind = 'v' 
-                        and relname not like 'SYS_%'
-                        and relname not like 'V_SYS_%' 
-                        and relname not like 'sql_%' 
-                        and relname not like 'AQ$%' 
-                        AND relvbase=1
-                        AND relname NOT IN('LOGIN_FORBIDDEN_RULE','DBMS_LOCK_ALLOCATED','DUAL'，'_OBJ_BINLOG_SHOW_EVENTS_','USER_LOGIN_HISTORY','LOGIN_ALLOW_IPLIST')
+                return @" select cast(relname as varchar(500)) as Name , DESCRIPTION AS Description FROM sys_class  t 
+                        LEFT JOIN sys_description  d ON t.OID=d.OBJOID AND d.OBJSUBID=0 
+                        WHERE  t.relvbase>0 AND t.relkind = 'v'  AND t.relnamespace=(SELECT OID FROM  sys_namespace WHERE nspname =USER)
                         order by relname";
             }
         }
@@ -197,6 +194,7 @@ INFO_SCHEM.ALL_TAB_COLUMNS WHERE upper(TABLE_NAME)=upper('{0}')
                 return "  Select count(1) from (SELECT to_regclass('{0}') as c ) t where t.c is not null";
             }
         }
+        protected override string IsAnyProcedureSql => throw new NotImplementedException();
 
         #endregion
 
@@ -244,15 +242,36 @@ INFO_SCHEM.ALL_TAB_COLUMNS WHERE upper(TABLE_NAME)=upper('{0}')
         #region Methods
         public override bool UpdateColumn(string tableName, DbColumnInfo columnInfo)
         {
+
             tableName = this.SqlBuilder.GetTranslationTableName(tableName);
             var columnName= this.SqlBuilder.GetTranslationColumnName(columnInfo.DbColumnName);
-            string sql = GetUpdateColumnSql(tableName, columnInfo);
-            this.Context.Ado.ExecuteCommand(sql);
+            string type = GetType(tableName, columnInfo);
+            //this.Context.Ado.ExecuteCommand(sql);
+
+            string sql= @"ALTER TABLE {table} ALTER TYPE {column} {type};ALTER TABLE {table} ALTER COLUMN {column} {null}";
+
             var isnull = columnInfo.IsNullable?" DROP NOT NULL ": " SET NOT NULL ";
-            this.Context.Ado.ExecuteCommand(string.Format("alter table {0} alter {1} {2}",tableName,columnName, isnull));
+
+            sql = sql.Replace("{table}", tableName)
+                .Replace("{type}", type)
+                .Replace("{column}", columnName)
+                .Replace("{null}", isnull); 
+            this.Context.Ado.ExecuteCommand(sql);
             return true;
         }
 
+        protected string GetType(string tableName, DbColumnInfo columnInfo)
+        {
+            string columnName = this.SqlBuilder.GetTranslationColumnName(columnInfo.DbColumnName);
+            tableName = this.SqlBuilder.GetTranslationTableName(tableName);
+            string dataSize = GetSize(columnInfo);
+            string dataType = columnInfo.DataType;
+            //if (!string.IsNullOrEmpty(dataType))
+            //{
+            //    dataType =  dataType;
+            //}
+            return dataType +""+ dataSize;
+        }
         protected override string GetUpdateColumnSql(string tableName, DbColumnInfo columnInfo)
         {
             string columnName = this.SqlBuilder.GetTranslationColumnName(columnInfo.DbColumnName);
@@ -371,6 +390,13 @@ INFO_SCHEM.ALL_TAB_COLUMNS WHERE upper(TABLE_NAME)=upper('{0}')
         public override List<DbColumnInfo> GetColumnInfosByTableName(string tableName, bool isCache = true)
         {
             var result= base.GetColumnInfosByTableName(tableName.TrimStart('"').TrimEnd('"'), isCache);
+            foreach (var columnInfo in result) 
+            {
+                if (columnInfo.IsIdentity && !columnInfo.DataType.ObjToString().ToLower().Contains("int")) 
+                {
+                    columnInfo.IsIdentity = false;
+                }
+            }
             string sql = "select * from " + SqlBuilder.GetTranslationTableName(tableName) + " WHERE 1=2 ";
             var oldIsEnableLog = this.Context.Ado.IsEnableLogEvent;
             this.Context.Ado.IsEnableLogEvent = false;

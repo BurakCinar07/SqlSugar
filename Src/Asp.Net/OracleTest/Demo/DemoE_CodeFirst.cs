@@ -1,6 +1,7 @@
 ﻿using SqlSugar;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text;
 
@@ -19,13 +20,114 @@ namespace OrmTest
                 InitKeyType = InitKeyType.Attribute,
                 IsAutoCloseConnection = true
             });
+            db.CodeFirst.InitTables<CodeFirstafda1>();
+            db.CodeFirst.InitTables<CODEFIRSTAFDA1>();
             db.CodeFirst.InitTables(typeof(CodeFirstTable1));//Create CodeFirstTable1 
             db.Insertable(new CodeFirstTable1() { Name = "a", Text="a" }).ExecuteCommand();
             var list = db.Queryable<CodeFirstTable1>().ToList();
+            db.CodeFirst.InitTables<PictureData>();
+            db.CodeFirst.InitTables<PictureData>();
+            db.CodeFirst.InitTables<EnumTypeClass>();
+            db.Insertable(new EnumTypeClass() { enumType= EnumType.x1, SerialNo= Guid.NewGuid() + "" }).ExecuteCommand();
+            var list2=db.Queryable<EnumTypeClass>().Select(x => new EnumTypeClass()
+            {
+                enumType =  x.enumType ,
+                SerialNo = x.SerialNo
+            }).ToList();
+            db.Aop.OnLogExecuting = (s, p) => Console.WriteLine(s);
+            db.CurrentConnectionConfig.MoreSettings = new ConnMoreSettings()
+            {
+                IsAutoToUpper = false
+            };
+            db.CodeFirst.InitTables<CodeFirstNoUpper>();
+            db.Insertable(new CodeFirstNoUpper() { Id = Guid.NewGuid() + "", Name = "a" }).ExecuteCommand();
+            var list3 = db.Queryable<CodeFirstNoUpper>().Where(it => it.Id != null).ToList();
+            db.Updateable(list3).ExecuteCommand();
+            db.Deleteable(list3).ExecuteCommand();
+            db.Updateable(list3.First()).ExecuteCommand();
+            db.Deleteable<CodeFirstNoUpper>().Where(it => it.Id != null).ExecuteCommand();
+            db.Updateable<CodeFirstNoUpper>().SetColumns(it => it.Name == "a").Where(it => it.Id != null).ExecuteCommand();
+            db.Updateable<CodeFirstNoUpper>().SetColumns(it => new CodeFirstNoUpper()
+            {
+                Name = "a"
+            }).Where(it => it.Id != null).ExecuteCommand();
+            db.Queryable<CodeFirstNoUpper>()
+                .Select(it => new CodeFirstNoUpper()
+                {
+                    Id = SqlFunc.Subqueryable<CodeFirstNoUpper>().Where(z => z.Id == it.Id).Select(z => z.Id)
+                }).ToList();
+            db.Queryable<CodeFirstNoUpper>().LeftJoin<CodeFirstNoUpper>((s, y) => s.Id == y.Id)
+                .Select((s, y) => y).ToList();
+
+            //SqlSugarClient db2 = new SqlSugarClient(new ConnectionConfig()
+            //{
+            //    DbType = DbType.Oracle,
+            //    ConnectionString = Config.ConnectionString3,
+            //    InitKeyType = InitKeyType.Attribute,
+            //    IsAutoCloseConnection = true,
+            //    MoreSettings=new ConnMoreSettings() 
+            //    {
+            //          EnableOracleIdentity=true
+            //    }
+            //});
+            //db2.Aop.OnLogExecuting = (s, p) => Console.WriteLine(s);
+            //db2.CodeFirst.InitTables<CodeFIrstadfa>();
+            //var id = db2.Insertable(new CodeFIrstadfa() { Id = 1, Name = "a" }).ExecuteReturnIdentity();
+            //var id11 = db2.Insertable(new CodeFIrstadfa() { Id = 1, Name = "a" }).ExecuteReturnIdentityAsync().GetAwaiter().GetResult();
+            //var id111 = db2.Insertable(new CodeFIrstadfa() { Id = 1, Name = "a" }).ExecuteReturnBigIdentityAsync().GetAwaiter().GetResult();
+            //var id1111 = db2.Insertable(new CodeFIrstadfa() { Id = 1, Name = "a" }).ExecuteReturnBigIdentity();
+            //var id2 = db2.Insertable(new List<CodeFIrstadfa>() { new CodeFIrstadfa() { Id = 1, Name = "a" }, new CodeFIrstadfa() { Id = 1, Name = "a" } }).ExecuteReturnIdentity();
             Console.WriteLine("#### CodeFirst end ####");
         }
     }
+    public class CodeFirstafda1 
+    {
+        [SugarColumn(ColumnDataType="number")]
+        public int id { get; set; }
+        [SugarColumn(ColumnDataType = "number")]
+        public long id2 { get; set; }
+    }
+    public class CODEFIRSTAFDA1
+    {
+        public int id { get; set; }
+        public long id2 { get; set; }
+    }
+    public class CodeFIrstadfa 
+    {
+        [SugarColumn(IsIdentity =true,IsPrimaryKey =true)]
+        public int Id { get; set; }
+        [SugarColumn(IsNullable =true)]
+        public string Name { get; set; }
+    }
+    public class CodeFirstNoUpper
+    {
+        [SugarColumn(IsPrimaryKey = true)]
+        public string Id { get; set; }
+        public string Name { get; set; }
+    }
 
+    public class EnumTypeClass 
+    {
+        [SugarColumn(IsPrimaryKey = true,Length =50)]
+        public string SerialNo { get; set; }
+        [SugarColumn(ColumnDataType ="number(22,0)")]
+        public EnumType enumType { get; set; }
+    }
+    public enum EnumType { 
+       x1=-1,
+       x2=2
+    }
+
+    [SugarTable("Picture1")]
+    public class PictureData
+    {
+        [SugarColumn(IsPrimaryKey = true)]
+        public string SampleNo { get; set; }
+
+        [SugarColumn(IsPrimaryKey = true)]
+        public int SerialNo { get; set; }
+        public byte[] Data { get; set; }
+    }
     public class CodeFirstTable1
     {
         [SugarColumn(OracleSequenceName ="SEQ_ID", IsPrimaryKey = true)]

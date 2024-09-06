@@ -26,6 +26,10 @@ namespace SqlSugar
         {
             return inValues.Any(it => thisValue.Contains(it));
         }
+        public static bool IsContainsStartWithIn(this string thisValue, params string[] inValues)
+        {
+            return inValues.Any(it => thisValue.StartsWith(it));
+        }
 
         public static bool IsNullOrEmpty(this object thisValue)
         {
@@ -152,6 +156,18 @@ namespace SqlSugar
         public static bool IsCollectionsList(this string thisValue)
         {
             return (thisValue + "").StartsWith("System.Collections.Generic.List")|| (thisValue + "").StartsWith("System.Collections.Generic.IEnumerable");
+        }
+        public static bool IsIterator(this Type type)
+        {
+            if (type.BaseType == null)
+            {
+                return false;
+            }
+            if (type.BaseType.IsGenericType)
+            {
+                return type.BaseType?.GetGenericTypeDefinition()?.FullName == "System.Linq.Enumerable+Iterator`1";
+            }
+            return false;
         }
         public static bool IsStringArray(this string thisValue)
         {

@@ -9,6 +9,7 @@ namespace SqlSugar
 {
     public class OracleQueryBuilder : QueryBuilder
     {
+        public override bool IsSelectNoAll { get; set; } = true;
         public override bool IsComplexModel(string sql)
         {
             return Regex.IsMatch(sql, @"AS ""\w+\.\w+""")|| Regex.IsMatch(sql, @"AS ""\w+\.\w+\.\w+""");
@@ -22,34 +23,49 @@ namespace SqlSugar
         }
         public override string ToSqlString()
         {
+            if (this.Offset == "true") 
+            {
+                return OffsetPage();
+            }
             var oldTake = Take;
             var oldSkip = Skip;
             var isDistinctPage = IsDistinct && (Take > 1 || Skip > 1);
             if (isDistinctPage)
             {
-                Take = null;
-                Skip = null;
+                return OffsetPage();
             }
             var result = _ToSqlString();
-            if (isDistinctPage)
-            {
-                if (this.OrderByValue.HasValue())
-                {
-                    Take = int.MaxValue;
-                    result = result.Replace("DISTINCT", $" DISTINCT TOP {int.MaxValue} ");
-                }
-                Take = oldTake;
-                Skip = oldSkip;
-                result = this.Context.SqlQueryable<object>(result).Skip(Skip??0).Take(Take??0).ToSql().Key;
+            //if (isDistinctPage)
+            //{
+            //    if (this.OrderByValue.HasValue())
+            //    {
+            //        Take = int.MaxValue;
+            //        result = result.Replace("DISTINCT", $" DISTINCT TOP {int.MaxValue} ");
+            //    }
+            //    Take = oldTake;
+            //    Skip = oldSkip;
+            //    result = this.Context.SqlQueryable<object>(result).Skip(Skip??0).Take(Take??0).ToSql().Key;
 
 
-            }
+            //}
             if (TranLock != null)
             {
                 result = result + TranLock;
             }
             return result;
         }
+
+        private string OffsetPage()
+        {
+            var skip = this.Skip??1;
+            var take = this.Take;
+            this.Skip = null;
+            this.Take = null;
+            this.Offset = null;
+            var pageSql = $"SELECT * FROM ( SELECT PAGETABLE1.*,ROWNUM PAGEINDEX FROM( { this.ToSqlString() }) PAGETABLE1 WHERE ROWNUM<={skip+take}) WHERE PAGEINDEX>={(skip==0?skip:(skip+1))}";
+            return pageSql;
+        }
+
         public  string _ToSqlString()
         {
             string oldOrderBy = this.OrderByValue;
@@ -71,6 +87,11 @@ namespace SqlSugar
             sql.Replace(UtilConstants.ReplaceKey, isRowNumber ? (isIgnoreOrderBy ? null : rowNumberString) : null);
             if (isIgnoreOrderBy) { this.OrderByValue = oldOrderBy; return sql.ToString(); }
             var result = ToPageSql(sql.ToString(), this.Take, this.Skip);
+            if (this.GetGroupByString==null&&this.Take == 1 && this.Skip == 0&&oldOrderBy== "ORDER BY sysdate ") 
+            {
+                result = $" {sql.ToString()} {(this.WhereInfos.Any()?"AND":"WHERE")}   ROWNUM = 1 ";
+                result = result.Replace(rowNumberString, " ");
+            }
             if (ExternalPageIndex > 0)
             {
                 if (externalOrderBy.IsNullOrEmpty())

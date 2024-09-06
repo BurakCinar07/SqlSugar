@@ -13,6 +13,7 @@ namespace OrmTest
         public static void Init()
         {
             EasyExamples();
+            AccessAndSqliteTest();
             //QueryConditions();
             JoinTable();
             //Async();
@@ -23,6 +24,7 @@ namespace OrmTest
             //ReturnType();
             //ConfiQuery();
         }
+
 
         private static void ConfiQuery()
         {
@@ -172,8 +174,14 @@ namespace OrmTest
             //      Name=SqlFunc.Subqueryable<Order>().Select(s=>s.Name)
             //   }).ToList();
             var test19 = db.Queryable<Order>().Select<ViewOrder>().ToList();
-            var test20 = db.Queryable<Order>().LeftJoin<Custom>((o, cs) =>o.Id==cs.Id)
-                .ToDictionary(it => it.Id, it => it.Name);
+            var test20 = db.Queryable<Order>()
+                
+                .OrderBy(o=>o.Id )
+                .Select(o => new ViewOrder(){ 
+                Name=SqlFunc.Subqueryable<Custom>().Where(z=>z.Id==o.CustomId).Select(z=>z.Name)
+                ,Id=o.Id
+             })
+                  .ToPageList(2,2 );
 
             //var test21 = db.Queryable<Order>().Where(it=>it.Id.ToString()==1.ToString()).Select(it => it.CreateTime.ToString("24")).First();
             Console.WriteLine("#### Examples End ####");
@@ -289,6 +297,17 @@ namespace OrmTest
           .Any()
         ).ToList();
             Console.WriteLine("#### Subquery End ####");
+        }
+
+        private static void AccessAndSqliteTest()
+        {
+            var db = GetInstance();
+            var sqlitedb = GetSqliteInstance();
+            db.Queryable<Order>().ToList();
+            sqlitedb.DbMaintenance.CreateDatabase();
+            sqlitedb.CodeFirst.InitTables<Order>();
+            sqlitedb.Queryable<Order>().ToList();
+            db.Queryable<Order>().ToList();
         }
 
         private static void SqlFuncTest()
@@ -557,6 +576,24 @@ namespace OrmTest
             {
                 DbType = SqlSugar.DbType.Access,
                 ConnectionString = Config.ConnectionString,
+                InitKeyType = InitKeyType.Attribute,
+                IsAutoCloseConnection = true,
+                AopEvents = new AopEvents
+                {
+                    OnLogExecuting = (sql, p) =>
+                    {
+                        Console.WriteLine(sql);
+                        Console.WriteLine(string.Join(",", p?.Select(it => it.ParameterName + ":" + it.Value)));
+                    }
+                }
+            });
+        }
+        private static SqlSugarClient GetSqliteInstance()
+        {
+            return new SqlSugarClient(new ConnectionConfig()
+            {
+                DbType = SqlSugar.DbType.Sqlite,
+                ConnectionString = "DataSource=/sqlite.db",
                 InitKeyType = InitKeyType.Attribute,
                 IsAutoCloseConnection = true,
                 AopEvents = new AopEvents

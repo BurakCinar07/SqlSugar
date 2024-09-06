@@ -9,14 +9,20 @@ namespace SqlSugar
         SqlSugarProvider Context { get; set; }
         ICodeFirst BackupTable(int maxBackupDataRows = int.MaxValue);
         ICodeFirst SetStringDefaultLength(int length);
+
+        ICodeFirst As(Type type,string newTableName);
+        ICodeFirst As<T>(string newTableName);
+
         void InitTables(string entitiesNamespace);
         void InitTables(string[] entitiesNamespaces);
         void InitTables(params Type[] entityTypes);
+        void InitTablesWithAttr(params Type[] entityTypes);
         void InitTables(Type entityType);
         void InitTables<T>();
         void InitTables<T, T2>();
         void InitTables<T, T2, T3>();
         void InitTables<T, T2, T3, T4>();
+        void InitTables<T, T2, T3, T4,T5>();
         SplitCodeFirstProvider SplitTables();
         TableDifferenceProvider GetDifferenceTables<T>();
         TableDifferenceProvider GetDifferenceTables(params Type[] types);

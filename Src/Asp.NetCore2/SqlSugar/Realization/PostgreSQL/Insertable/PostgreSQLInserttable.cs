@@ -13,8 +13,10 @@ namespace SqlSugar
         {
             InsertBuilder.IsReturnIdentity = true;
             PreToSql();
-            string sql = InsertBuilder.ToSqlString().Replace("$PrimaryKey",this.SqlBuilder.GetTranslationColumnName(GetIdentityKeys().FirstOrDefault()));
+            string identityColumn = GetIdentityColumn();
+            string sql = InsertBuilder.ToSqlString().Replace("$PrimaryKey", this.SqlBuilder.GetTranslationColumnName(identityColumn));
             RestoreMapping();
+            AutoRemoveDataCache();
             var result = Ado.GetScalar(sql, InsertBuilder.Parameters == null ? null : InsertBuilder.Parameters.ToArray()).ObjToInt();
             After(sql, result);
             return result;
@@ -23,8 +25,10 @@ namespace SqlSugar
         {
             InsertBuilder.IsReturnIdentity = true;
             PreToSql();
-            string sql = InsertBuilder.ToSqlString().Replace("$PrimaryKey", this.SqlBuilder.GetTranslationColumnName(GetIdentityKeys().FirstOrDefault()));
+            string identityColumn = GetIdentityColumn();
+            string sql = InsertBuilder.ToSqlString().Replace("$PrimaryKey", this.SqlBuilder.GetTranslationColumnName(identityColumn));
             RestoreMapping();
+            AutoRemoveDataCache();
             var obj = await Ado.GetScalarAsync(sql, InsertBuilder.Parameters == null ? null : InsertBuilder.Parameters.ToArray());
             var result = obj.ObjToInt();
             After(sql, result);
@@ -33,7 +37,16 @@ namespace SqlSugar
         public override KeyValuePair<string, List<SugarParameter>> ToSql()
         {
             var result= base.ToSql();
-            return new KeyValuePair<string, List<SugarParameter>>(result.Key.Replace("$PrimaryKey", GetPrimaryKeys().FirstOrDefault()), result.Value);
+            var primaryKey = GetPrimaryKeys().FirstOrDefault();
+            if (primaryKey != null)
+            {
+                primaryKey = this.SqlBuilder.GetTranslationColumnName(primaryKey);
+            }
+            else if(result.Key?.EndsWith(" returning $PrimaryKey") ==true)
+            {
+                result=new KeyValuePair<string, List<SugarParameter>>( result.Key.Replace(" returning $PrimaryKey", null),result.Value);
+            }
+            return new KeyValuePair<string, List<SugarParameter>>(result.Key.Replace("$PrimaryKey", primaryKey), result.Value);
         }
 
         public override long ExecuteReturnBigIdentity()
@@ -42,6 +55,7 @@ namespace SqlSugar
             PreToSql();
             string sql = InsertBuilder.ToSqlString().Replace("$PrimaryKey", this.SqlBuilder.GetTranslationColumnName(GetIdentityKeys().FirstOrDefault()));
             RestoreMapping();
+            AutoRemoveDataCache();
             var result = Convert.ToInt64(Ado.GetScalar(sql, InsertBuilder.Parameters == null ? null : InsertBuilder.Parameters.ToArray()) ?? "0");
             After(sql, result);
             return result;
@@ -52,6 +66,7 @@ namespace SqlSugar
             PreToSql();
             string sql = InsertBuilder.ToSqlString().Replace("$PrimaryKey", this.SqlBuilder.GetTranslationColumnName(GetIdentityKeys().FirstOrDefault()));
             RestoreMapping();
+            AutoRemoveDataCache();
             var result = Convert.ToInt64(await Ado.GetScalarAsync(sql, InsertBuilder.Parameters == null ? null : InsertBuilder.Parameters.ToArray()) ?? "0");
             After(sql, result);
             return result;
@@ -74,5 +89,17 @@ namespace SqlSugar
             typeof(T).GetProperties().First(t => t.Name.ToUpper() == propertyName.ToUpper()).SetValue(result, setValue, null);
             return idValue > 0;
         }
+
+        private string GetIdentityColumn()
+        {
+            var identityColumn = GetIdentityKeys().FirstOrDefault();
+            if (identityColumn == null)
+            {
+                var columns = this.Context.DbMaintenance.GetColumnInfosByTableName(InsertBuilder.GetTableNameString);
+                identityColumn = columns.First(it => it.IsIdentity || it.IsPrimarykey).DbColumnName;
+            }
+            return identityColumn;
+        }
+
     }
 }

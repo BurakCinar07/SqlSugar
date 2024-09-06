@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -10,12 +11,17 @@ namespace SqlSugar
 {
     public partial class DbBindAccessory
     {
+        public QueryBuilder QueryBuilder { get; set; } 
+
         protected List<T> GetEntityList<T>(SqlSugarProvider context, IDataReader dataReader)
         {
             Type type = typeof(T);
+            var entityInfo = context.EntityMaintenance.GetEntityInfo(type);
+            var isOwnsOne = entityInfo.Columns.Any(it => it.ForOwnsOnePropertyInfo != null);
             string types = null;
             var fieldNames = GetDataReaderNames(dataReader,ref types);
             string cacheKey = GetCacheKey(type,fieldNames) + types;
+            var dataAfterFunc = context.CurrentConnectionConfig?.AopEvents?.DataExecuted;
             IDataReaderEntityBuilder<T> entytyList = context.Utilities.GetReflectionInoCacheInstance().GetOrCreate(cacheKey, () =>
             {
                 var cacheResult = new IDataReaderEntityBuilder<T>(context, dataReader,fieldNames).CreateBuilder(type);
@@ -27,21 +33,47 @@ namespace SqlSugar
                 if (dataReader == null) return result;
                 while (dataReader.Read())
                 {
-                    result.Add(entytyList.Build(dataReader));
+                    //try
+                    //{
+                        var addItem = entytyList.Build(dataReader);
+                        if (this.QueryBuilder?.QueryableFormats?.Any() == true) 
+                        {
+                          FormatT(addItem);
+                        }
+                        result.Add(addItem);
+                    //}
+                    //catch (Exception ex)
+                    //{
+                    //    Check.Exception(true, ErrorMessage.EntityMappingError, ex.Message);
+                    //}
+                    SetAppendColumns(dataReader);
+                    SetOwnsOne(addItem,isOwnsOne,entityInfo,dataReader);
                 }
+                ExecuteDataAfterFun(context, dataAfterFunc, result);
             }
-            catch (Exception ex)
+            catch(Exception ex)
             {
-                Check.Exception(true, ErrorMessage.EntityMappingError, ex.Message);
+                if (ex.Message == "Common Language Runtime detected an invalid program.")
+                {
+                    Check.Exception(true, ErrorMessage.EntityMappingError, ex.Message);
+                }
+                else
+                {
+                    throw;
+                }
             }
             return result;
         }
+
         protected async Task<List<T>> GetEntityListAsync<T>(SqlSugarProvider context, IDataReader dataReader)
         {
             Type type = typeof(T);
+            var entityInfo = context.EntityMaintenance.GetEntityInfo(type);
+            var isOwnsOne = entityInfo.Columns.Any(it => it.ForOwnsOnePropertyInfo != null);
             string types = null;
             var fieldNames = GetDataReaderNames(dataReader,ref types);
             string cacheKey = GetCacheKey(type, fieldNames)+types;
+            var dataAfterFunc = context.CurrentConnectionConfig?.AopEvents?.DataExecuted;
             IDataReaderEntityBuilder<T> entytyList = context.Utilities.GetReflectionInoCacheInstance().GetOrCreate(cacheKey, () =>
             {
                 var cacheResult = new IDataReaderEntityBuilder<T>(context, dataReader, fieldNames).CreateBuilder(type);
@@ -51,19 +83,141 @@ namespace SqlSugar
             try
             {
                 if (dataReader == null) return result;
-                while (await((DbDataReader)dataReader).ReadAsync())
+                while (await GetReadAsync(dataReader,context))
                 {
-                    result.Add(entytyList.Build(dataReader));
+                    //try
+                    //{
+                    var addItem = entytyList.Build(dataReader);
+                    if (this.QueryBuilder?.QueryableFormats?.Any() == true)
+                    {
+                        FormatT(addItem);
+                    }
+                    result.Add(addItem);
+                    //}
+                    //catch (Exception ex)
+                    //{
+                    //    Check.Exception(true, ErrorMessage.EntityMappingError, ex.Message);
+                    //}
+                    SetAppendColumns(dataReader);
+                    SetOwnsOne(addItem, isOwnsOne, entityInfo, dataReader);
                 }
+                ExecuteDataAfterFun(context, dataAfterFunc, result);
             }
             catch (Exception ex)
             {
-                Check.Exception(true, ErrorMessage.EntityMappingError, ex.Message);
+                if (ex.Message == "Common Language Runtime detected an invalid program.")
+                {
+                    Check.Exception(true, ErrorMessage.EntityMappingError, ex.Message);
+                }
+                else
+                {
+                    throw;
+                }
             }
             return result;
         }
 
-        private  string GetCacheKey(Type type,List<string> keys)
+        private  Task<bool> GetReadAsync(IDataReader dataReader, SqlSugarProvider context)
+        {
+            if (this.QueryBuilder?.Builder?.SupportReadToken==true&&context.Ado.CancellationToken!=null)
+            { 
+                return this.QueryBuilder.Builder.GetReaderByToken(dataReader, context.Ado.CancellationToken.Value);
+            }
+            else
+            {
+                return ((DbDataReader)dataReader).ReadAsync();
+            }
+        }
+
+        private void SetOwnsOne(object addItem, bool isOwnsOne, EntityInfo entityInfo, IDataReader dataReader)
+        {
+            if (isOwnsOne) 
+            {
+                var ownsOneColumnsKv = entityInfo.Columns.Where(it => it.ForOwnsOnePropertyInfo != null)
+                    .GroupBy(it=>it.ForOwnsOnePropertyInfo).ToList();
+                foreach (var kv in ownsOneColumnsKv)
+                {
+                    var parentObj=kv.Key.GetValue(addItem);
+                    if (parentObj == null) 
+                    {
+                        parentObj = kv.Key.PropertyType.Assembly.CreateInstance(kv.Key.PropertyType.FullName);
+                        kv.Key.SetValue(addItem, parentObj);
+                    }
+                    foreach (var item in kv.ToList())
+                    {
+                        if (this.QueryBuilder?.SelectValue?.Equals("1")==true) 
+                        {
+                            continue;
+                        }
+                         var itemIndex=dataReader.GetOrdinal(item.DbColumnName);
+                        if (item.SqlParameterDbType is Type&&item.UnderType.IsEnum && dataReader.GetValue(itemIndex) is string value)
+                        {
+                            item.PropertyInfo.SetValue(parentObj,UtilMethods.ChangeType2(value, item.PropertyInfo.PropertyType));
+                        }
+                        else if (item.IsJson) 
+                        { 
+                            item.PropertyInfo.SetValue(parentObj, Newtonsoft.Json.JsonConvert.DeserializeObject(dataReader.GetValue(itemIndex)?.ToString(), item.PropertyInfo.PropertyType));
+                        }
+                        else
+                        {
+                            var setValue = dataReader.GetValue(itemIndex);
+                            if (setValue == DBNull.Value) 
+                            {
+                                setValue = null;
+                            }
+                            if (item.UnderType == UtilConstants.GuidType&& setValue is string) 
+                            {
+                                if (setValue != null) 
+                                {
+                                    setValue = Guid.Parse(setValue+"");
+                                }
+                            }
+                            else if (item.UnderType?.IsEnum==true&& setValue!=null)
+                            {
+                                setValue = UtilMethods.ChangeType2(setValue, item.UnderType);
+                            }
+                            item.PropertyInfo.SetValue(parentObj, setValue);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void FormatT<T>(T addItem)
+        {
+            var formats = this.QueryBuilder.QueryableFormats;
+            var columns = this.QueryBuilder.Context.EntityMaintenance.GetEntityInfoWithAttr(typeof(T))
+                .Columns.Where(it => formats.Any(y => y.PropertyName == it.PropertyName)).ToList();
+            if (columns.Any())
+            {
+                foreach (var item in formats)
+                {
+                    var columnInfo = columns.FirstOrDefault(it => it.PropertyName == item.PropertyName);
+                    var value = columnInfo.PropertyInfo.GetValue(addItem);
+                    value = UtilMethods.GetFormatValue(value, item);
+                    columnInfo.PropertyInfo.SetValue(addItem, value);
+                }
+            }
+        }
+
+        private static void ExecuteDataAfterFun<T>(SqlSugarProvider context, Action<object, DataAfterModel> dataAfterFunc, List<T> result)
+        {
+            if (dataAfterFunc != null)
+            {
+                var entity = context.EntityMaintenance.GetEntityInfo<T>();
+                foreach (var item in result)
+                {
+                    dataAfterFunc(item, new DataAfterModel()
+                    {
+                        EntityColumnInfos = entity.Columns,
+                        Entity = entity,
+                        EntityValue = item
+                    });
+                }
+            }
+        }
+
+        private string GetCacheKey(Type type,List<string> keys)
         {
             StringBuilder sb = new StringBuilder("DataReaderToList.");
             sb.Append(type.FullName);
@@ -73,6 +227,39 @@ namespace SqlSugar
                 sb.Append(item);
             }
             return sb.ToString();
+        }
+
+        private void SetAppendColumns(IDataReader dataReader)
+        {
+            if (QueryBuilder != null && QueryBuilder.AppendColumns != null && QueryBuilder.AppendColumns.Any())
+            {
+                if (QueryBuilder.AppendValues == null)
+                    QueryBuilder.AppendValues = new List<List<QueryableAppendColumn>>();
+                List<QueryableAppendColumn> addItems = new List<QueryableAppendColumn>();
+                foreach (var item in QueryBuilder.AppendColumns)
+                {
+                    var vi = dataReader.GetOrdinal(item.AsName);
+                    var value = dataReader.GetValue(vi);
+                    addItems.Add(new QueryableAppendColumn()
+                    {
+                        Name = item.Name,
+                        AsName = item.AsName,
+                        Value = value
+                    });
+                }
+                QueryBuilder.AppendValues.Add(addItems);
+            }
+            if (QueryBuilder?.AppendNavInfo != null) 
+            {
+                var navResult = new AppendNavResult();
+                foreach (var item in QueryBuilder?.AppendNavInfo.AppendProperties)
+                {
+                    var vi = dataReader.GetOrdinal("SugarNav_" + item.Key);
+                    var value = dataReader.GetValue(vi);
+                    navResult.result.Add("SugarNav_"+item.Key,value);
+                }
+                QueryBuilder?.AppendNavInfo.Result.Add(navResult);
+            }
         }
 
         private List<string> GetDataReaderNames(IDataReader dataReader,ref string types)
@@ -239,9 +426,13 @@ namespace SqlSugar
             {
                 result.Add((T)Enum.Parse(type, value.ObjToString()));
             }
+            else if (value!=null&&UtilMethods.GetUnderType(type).IsEnum)
+            {
+                result.Add((T)Enum.Parse(UtilMethods.GetUnderType(type), value.ObjToString()));
+            }
             else
             {
-                result.Add((T)Convert.ChangeType(value, UtilMethods.GetUnderType(type)));
+                result.Add((T)UtilMethods.ChangeType2(value, type));
             }
         }
     }

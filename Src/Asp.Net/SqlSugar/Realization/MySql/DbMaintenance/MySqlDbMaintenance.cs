@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -153,6 +154,13 @@ namespace SqlSugar
                 return "alter table {0} change  column {1} {2}";
             }
         }
+        protected override string IsAnyProcedureSql
+        {
+            get 
+            {
+                return "select count(*) from information_schema.Routines where ROUTINE_NAME='{0}' and ROUTINE_TYPE='PROCEDURE'";
+            }
+        }
         #endregion
 
         #region Check
@@ -269,12 +277,67 @@ namespace SqlSugar
         {
             get
             {
-                return "SELECT count(*) FROM information_schema.statistics WHERE index_name = '{0}'";
+                return "SELECT count(*) FROM information_schema.statistics WHERE index_name = '{0}' and index_schema = '{1}'";
             }
         }
         #endregion
 
         #region Methods
+        public override bool SetAutoIncrementInitialValue(string tableName, int initialValue)
+        {
+            initialValue++;
+            this.Context.Ado.ExecuteCommand($"ALTER TABLE " + this.SqlBuilder.GetTranslationColumnName(tableName) + " AUTO_INCREMENT = " + initialValue);
+            return true;
+        }
+        public override bool SetAutoIncrementInitialValue(Type entityType, int initialValue)
+        {
+            return this.SetAutoIncrementInitialValue(this.Context.EntityMaintenance.GetEntityInfo(entityType).DbTableName, initialValue);
+        }
+        public override List<string> GetDbTypes()
+        {
+            return this.Context.Ado.SqlQuery<string>(@"SELECT DISTINCT DATA_TYPE
+FROM information_schema.COLUMNS");
+        }
+        public override List<string> GetTriggerNames(string tableName)
+        {
+            return this.Context.Ado.SqlQuery<string>(@"SELECT TRIGGER_NAME
+FROM INFORMATION_SCHEMA.TRIGGERS
+WHERE EVENT_OBJECT_TABLE = '"+tableName+"'");
+        }
+        public override List<string> GetFuncList()
+        {
+            return this.Context.Ado.SqlQuery<string>(" SELECT routine_name\r\nFROM information_schema.ROUTINES\r\nWHERE routine_schema = (SELECT DATABASE()) AND routine_type = 'FUNCTION'; ");
+        }
+
+        public override List<string> GetIndexList(string tableName)
+        {
+            var sql = $"SHOW INDEX FROM {this.SqlBuilder.GetTranslationColumnName(tableName)}";
+            return this.Context.Ado.GetDataTable(sql).AsEnumerable().Cast<DataRow>().Select(it => it["key_name"]).Cast<string>().ToList();
+        }
+        public override List<string> GetProcList(string dbName)
+        {
+            var sql = $"SELECT ROUTINE_NAME FROM information_schema.ROUTINES WHERE ROUTINE_TYPE = 'PROCEDURE' AND ROUTINE_SCHEMA = '{dbName}'";
+            return this.Context.Ado.SqlQuery<string>(sql);
+        }
+        public override bool IsAnyTable(string tableName, bool isCache = true)
+        {
+            try
+            {
+                return base.IsAnyTable(tableName, isCache);
+            }
+            catch (Exception ex)
+            {
+                if (SugarCompatible.IsFramework && ex.Message == "Invalid attempt to Read when reader is closed.")
+                {
+                    Check.ExceptionEasy($"To upgrade the MySql.Data. Error:{ex.Message}", $" 请先升级MySql.Data 。 详细错误:{ex.Message}");
+                    return true;
+                }
+                else
+                {
+                    throw;
+                }
+            }
+        }
         public override bool IsAnyColumnRemark(string columnName, string tableName)
         {
             var isAny=this.Context.DbMaintenance.GetColumnInfosByTableName(tableName, false)
@@ -283,13 +346,32 @@ namespace SqlSugar
         }
         public override bool AddColumnRemark(string columnName, string tableName, string description)
         {
-            //base.AddColumnRemark(columnName, tableName, description);
-            var message= @"db.DbMaintenance.UpdateColumn(""tablename"", new DbColumnInfo()
-            {{
-                DataType = ""VARCHAR(30) NOT NULL COMMENT 'xxxxx'"",
-                DbColumnName = ""columnname""
-            }})" ;
-            Check.Exception(true,"MySql no support AddColumnRemark , use " + message);
+
+            tableName = this.SqlBuilder.GetTranslationColumnName(tableName);
+            columnName = this.SqlBuilder.GetTranslationColumnName(columnName);
+            var sql = this.Context.Ado.GetDataTable($"SHOW CREATE TABLE {tableName};").Rows[0][1] + "";
+            var columns = sql.Split('\n');
+            var columnList = columns.Where(it => it.Last() == ',').ToList();
+
+            foreach (var column in columnList)
+            {
+                if (column.Contains(columnName))
+                {
+                    Regex regex = new Regex(" COMMENT .+$");
+                    var newcolumn = regex.Replace(column, "");
+                    newcolumn += $" COMMENT '{description.ToSqlFilter()}'  ";
+                    var updateSql = $"ALTER TABLE {tableName} MODIFY COLUMN " + newcolumn.TrimEnd(',');
+                    this.Context.Ado.ExecuteCommand(updateSql);
+                    break;
+                }
+            }
+            ////base.AddColumnRemark(columnName, tableName, description);
+            //var message= @"db.DbMaintenance.UpdateColumn(""tablename"", new DbColumnInfo()
+            //{{
+            //    DataType = ""VARCHAR(30) NOT NULL COMMENT 'xxxxx'"",
+            //    DbColumnName = ""columnname""
+            //}})" ;
+            //Check.Exception(true,"MySql no support AddColumnRemark , use " + message);
             return true;
         }
         /// <summary>
@@ -299,6 +381,12 @@ namespace SqlSugar
         /// <returns></returns>
         public override bool CreateDatabase(string databaseName, string databaseDirectory = null)
         {
+
+            if (this.Context.Ado.IsValidConnection()&&this.Context.Ado.Connection.Database?.ToLower()==databaseName?.ToLower())
+            {
+                return true;
+            }
+
             if (databaseDirectory != null)
             {
                 if (!FileHelper.IsExistDirectory(databaseDirectory))
@@ -308,8 +396,22 @@ namespace SqlSugar
             }
             var oldDatabaseName = this.Context.Ado.Connection.Database;
             var connection = this.Context.CurrentConnectionConfig.ConnectionString;
-            Check.Exception(Regex.Split(connection,oldDatabaseName).Length > 2, "The user name and password cannot be the same as the database name ");
-            connection = connection.Replace(oldDatabaseName, "mysql");
+            if (Regex.Split(connection, oldDatabaseName).Length > 2)
+            {
+                var name = Regex.Match(connection, @"database\=\w+|datasource\=\w+", RegexOptions.IgnoreCase).Value;
+                if (!string.IsNullOrEmpty(name))
+                {
+                    connection = connection.Replace(name, "database=mysql");
+                }
+                else
+                {
+                    Check.ExceptionEasy("Failed to create the database. The database name has a keyword. Please change the name", "建库失败，库名存在关键字，请换一个名字");
+                }
+            }
+            else
+            {
+                connection = connection.Replace(oldDatabaseName, "mysql");
+            }
             var newDb = new SqlSugarClient(new ConnectionConfig()
             {
                 DbType = this.Context.CurrentConnectionConfig.DbType,
@@ -318,7 +420,23 @@ namespace SqlSugar
             });
             if (!GetDataBaseList(newDb).Any(it => it.Equals(databaseName, StringComparison.CurrentCultureIgnoreCase)))
             {
-                newDb.Ado.ExecuteCommand(string.Format(CreateDataBaseSql, databaseName, databaseDirectory));
+                var createSql = CreateDataBaseSql;
+                if (ContainsCharSet("utf8mb4"))
+                {
+                    createSql = createSql.Replace("utf8 COLLATE utf8_general_ci", "utf8mb4");
+                }
+                if (!string.IsNullOrEmpty(StaticConfig.CodeFirst_MySqlCollate))
+                {
+                    if (createSql.Contains(" COLLATE "))
+                    {
+                        createSql = $" {Regex.Split(createSql, " COLLATE ").First()} COLLATE  {StaticConfig.CodeFirst_MySqlCollate} ";
+                    }
+                    else
+                    {
+                        createSql += $" COLLATE  {StaticConfig.CodeFirst_MySqlCollate} ";
+                    }
+                }
+                newDb.Ado.ExecuteCommand(string.Format(createSql, databaseName, databaseDirectory));
             }
             return true;
         }
@@ -347,11 +465,16 @@ namespace SqlSugar
 
             }
             sql = sql.Replace("$PrimaryKey", primaryKeyInfo);
+            if (!string.IsNullOrEmpty(StaticConfig.CodeFirst_MySqlTableEngine))
+            {
+                sql += " ENGINE = " + StaticConfig.CodeFirst_MySqlTableEngine;
+            }
             this.Context.Ado.ExecuteCommand(sql);
             return true;
         }
         public override bool AddRemark(EntityInfo entity)
         {
+            var oldColumns = this.Context.DbMaintenance.GetColumnInfosByTableName(entity.DbTableName,false);
             var db = this.Context;
             db.DbMaintenance.AddTableRemark(entity.DbTableName, entity.TableDescription);
             List<EntityColumnInfo> columns = entity.Columns.Where(it => it.IsIgnore == false).ToList();
@@ -364,8 +487,12 @@ namespace SqlSugar
                     {
                         item.Length = 36;
                     }
-                    string sql = GetUpdateColumnSql(entity.DbTableName, mySqlCodeFirst.GetEntityColumnToDbColumn(entity, entity.DbTableName, item))+" "+(item.IsIdentity? "AUTO_INCREMENT" : "")+" " + " COMMENT '" + item.ColumnDescription + "'";
-                    db.Ado.ExecuteCommand(sql);
+                    var columnInfo = oldColumns.FirstOrDefault(it => it.DbColumnName.EqualCase(item.DbColumnName));
+                    if (columnInfo?.ColumnDescription.ObjToString() != item.ColumnDescription.ObjToString())
+                    {
+                        string sql = GetUpdateColumnSql(entity.DbTableName, mySqlCodeFirst.GetEntityColumnToDbColumn(entity, entity.DbTableName, item)) + " " + (item.IsIdentity ? "AUTO_INCREMENT" : "") + " " + " COMMENT '" + item.ColumnDescription + "'";
+                        db.Ado.ExecuteCommand(sql);
+                    }
                 }
             }
             return true;
@@ -384,10 +511,56 @@ namespace SqlSugar
                 string primaryKey = null;
                 string identity = item.IsIdentity ? this.CreateTableIdentity : null;
                 string addItem = string.Format(this.CreateTableColumn, this.SqlBuilder.GetTranslationColumnName(columnName), dataType, dataSize, nullType, primaryKey, identity);
+                if (!string.IsNullOrEmpty(item.ColumnDescription))
+                {
+                    addItem += " COMMENT '"+item.ColumnDescription.ToSqlFilter()+"' ";
+                }
                 columnArray.Add(addItem);
             }
             string tableString = string.Format(this.CreateTableSql, this.SqlBuilder.GetTranslationTableName(tableName), string.Join(",\r\n", columnArray));
             return tableString;
+        }
+
+
+        public override bool AddColumn(string tableName, DbColumnInfo columnInfo)
+        {
+            tableName = this.SqlBuilder.GetTranslationTableName(tableName);
+            var isAddNotNUll = columnInfo.IsNullable == false && columnInfo.DefaultValue.HasValue();
+            if (isAddNotNUll)
+            {
+                columnInfo = this.Context.Utilities.TranslateCopy(columnInfo);
+                columnInfo.IsNullable = true;
+            }
+            string sql = GetAddColumnSql(tableName, columnInfo);
+            if (sql != null && columnInfo.ColumnDescription.HasValue() &&!sql.ToLower().Contains("comment")) 
+            {
+                sql = $"{sql}{" COMMENT '"+ columnInfo.ColumnDescription.ToSqlFilter()+ "'  "}";
+            }
+            this.Context.Ado.ExecuteCommand(sql);
+            if (isAddNotNUll)
+            {
+                var dtColums = this.Context.Queryable<object>().AS(columnInfo.TableName).Where("1=2")
+                    .Select(this.SqlBuilder.GetTranslationColumnName(columnInfo.DbColumnName)).ToDataTable().Columns.Cast<System.Data.DataColumn>();
+                var dtColumInfo = dtColums.First(it => it.ColumnName.EqualCase(columnInfo.DbColumnName));
+                var type = UtilMethods.GetUnderType(dtColumInfo.DataType);
+                var value = type == UtilConstants.StringType ? (object)"" : Activator.CreateInstance(type);
+                if (this.Context.CurrentConnectionConfig.DbType == DbType.Oracle)
+                {
+                    value = columnInfo.DefaultValue;
+                    if (value.Equals(""))
+                    {
+                        value = "empty";
+                    }
+                }
+                var dt = new Dictionary<string, object>();
+                dt.Add(columnInfo.DbColumnName, value);
+                this.Context.Updateable(dt)
+                             .AS(tableName)
+                             .Where($"{columnInfo.DbColumnName} is null ").ExecuteCommand();
+                columnInfo.IsNullable = false;
+                UpdateColumn(tableName, columnInfo);
+            }
+            return true;
         }
 
         protected override string GetSize(DbColumnInfo item)
@@ -417,7 +590,7 @@ namespace SqlSugar
 
         public override bool RenameColumn(string tableName, string oldColumnName, string newColumnName)
         {
-            var columns=GetColumnInfosByTableName(tableName).Where(it=>it.DbColumnName.Equals(oldColumnName,StringComparison.CurrentCultureIgnoreCase));
+            var columns=GetColumnInfosByTableName(tableName,false).Where(it=>it.DbColumnName.Equals(oldColumnName,StringComparison.CurrentCultureIgnoreCase));
             if (columns != null && columns.Any())
             {
                 var column = columns.First();
@@ -452,18 +625,16 @@ namespace SqlSugar
             {
                 defaultValue = "";
             }
-            if (defaultValue.ToLower().IsIn("now()", "current_timestamp")|| defaultValue.ToLower().Contains("current_timestamp"))
+            if (defaultValue.ToLower().IsIn("now()", "current_timestamp","null") || defaultValue.ToLower().Contains("current_timestamp")|| defaultValue.Contains("()"))
             {
-                string template = "ALTER table {0} CHANGE COLUMN {1} {1} {3} default {2}";
-                var dbColumnInfo = this.Context.DbMaintenance.GetColumnInfosByTableName(tableName).First(it => it.DbColumnName.Equals(columnName, StringComparison.CurrentCultureIgnoreCase));
-                var value = Regex.Match(defaultValue, @"\(\d\)$").Value;
-                string sql = string.Format(template, tableName, columnName, defaultValue, dbColumnInfo.DataType+ value);
+                defaultValue = "(" + defaultValue + ")";
+                string sql = string.Format(AddDefaultValueSql.Replace("'", ""), tableName, columnName, defaultValue);
                 this.Context.Ado.ExecuteCommand(sql);
                 return true;
             }
-            else if (defaultValue=="0"|| defaultValue == "1")
+            else if (defaultValue == "0" || defaultValue == "1")
             {
-                string sql = string.Format(AddDefaultValueSql.Replace("'",""), tableName, columnName, defaultValue);
+                string sql = string.Format(AddDefaultValueSql.Replace("'", ""), tableName, columnName, defaultValue);
                 this.Context.Ado.ExecuteCommand(sql);
                 return true;
             }
@@ -482,6 +653,19 @@ namespace SqlSugar
             return false;
         }
 
+        #endregion
+        #region Helper
+        private bool ContainsCharSet(string charset)
+        {
+            if (this.Context.CurrentConnectionConfig.ConnectionString.ObjToString().ToLower().Contains(charset))
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
         #endregion
     }
 }

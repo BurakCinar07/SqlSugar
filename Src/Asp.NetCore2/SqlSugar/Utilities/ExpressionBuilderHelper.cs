@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -12,6 +13,27 @@ namespace SqlSugar
 {
     public class ExpressionBuilderHelper
     {
+        public static object CallFunc(Type type, object[] param, object methodData, string methodName)
+        {
+            MethodInfo mi = methodData.GetType().GetMethod(methodName).MakeGenericMethod(new Type[] { type });
+            var ret = mi.Invoke(methodData, param);
+            return ret;
+        }
+        public static T CallFunc<T>(object param, object methodData, string methodName)
+        {
+            Type type = param.GetType();
+            MethodInfo mi = methodData.GetType().GetMethod(methodName).MakeGenericMethod(new Type[] { type });
+            var ret = mi.Invoke(methodData, new object[] { param });
+            return (T)ret;
+        }
+
+        public static T CallStaticFunc<T>(object param, Type methodType, string methodName)
+        {
+            Type type = param.GetType();
+            MethodInfo mi = methodType.GetMethod(methodName).MakeGenericMethod(new Type[] { type });
+            var ret = mi.Invoke(null, new object[] { param });
+            return (T)ret;
+        }
         /// <summary>
         /// Create Expression
         /// </summary>
@@ -22,24 +44,82 @@ namespace SqlSugar
             {
                 return Expression.Equal(left, Expression.Convert(value, left.Type));
             }
+            else if (type == ExpressionType.NotEqual)
+            {
+                return Expression.NotEqual(left, Expression.Convert(value, left.Type));
+            }
             else 
             {
                 //Not implemented, later used in writing
                 return Expression.Equal(left, Expression.Convert(value, left.Type));
             }
         }
+        public static Expression CreateExpressionLike<ColumnType>(Type entityType,string propertyName,List<ColumnType>  list) 
+        {
+            var parameter = Expression.Parameter(entityType, "p");
+            MemberExpression memberProperty = Expression.PropertyOrField(parameter, propertyName);
+            MethodInfo method = typeof(List<>).MakeGenericType(typeof(ColumnType)).GetMethod("Contains");
+            ConstantExpression constantCollection = Expression.Constant(list);
+
+            MethodCallExpression methodCall = Expression.Call(constantCollection, method, memberProperty);
+
+            var expression = Expression.Lambda(methodCall, parameter);
+            return expression;
+        }
         public static Expression<Func<T, object>> CreateNewFields<T>(EntityInfo entity,List<string> propertyNames)
         {
             Type sourceType = typeof(T);
             Dictionary<string, PropertyInfo> sourceProperties = entity.Columns.Where(it=> propertyNames.Contains(it.PropertyName)).ToDictionary(it=>it.PropertyName,it=>it.PropertyInfo);
 
-            Type dynamicType = LinqRuntimeTypeBuilder.GetDynamicType(sourceProperties.Values);
 
-            ParameterExpression sourceItem = Expression.Parameter(sourceType, "t");
-            IEnumerable<MemberBinding> bindings = dynamicType.GetRuntimeProperties().Select(p => Expression.Bind(p, Expression.Property(sourceItem, sourceProperties[p.Name]))).OfType<MemberBinding>();
+            if (StaticConfig.EnableAot)
+            {
+                Type dynamicType =typeof(T);
 
-            return Expression.Lambda<Func<T, object>>(Expression.MemberInit(
-                Expression.New(dynamicType.GetConstructor(Type.EmptyTypes)), bindings), sourceItem); 
+                ParameterExpression sourceItem = Expression.Parameter(sourceType, "t");
+                IEnumerable<MemberBinding> bindings = dynamicType.GetProperties().Where(it=> sourceProperties.Any(s=>s.Key==it.Name)).Select(p => Expression.Bind(p, Expression.Property(sourceItem, sourceProperties[p.Name]))).OfType<MemberBinding>();
+
+                return Expression.Lambda<Func<T, object>>(Expression.MemberInit(
+                    Expression.New(dynamicType.GetConstructor(Type.EmptyTypes)), bindings), sourceItem);
+            }
+            else
+            {
+
+
+                Type dynamicType = LinqRuntimeTypeBuilder.GetDynamicType(sourceProperties.Values);
+
+                ParameterExpression sourceItem = Expression.Parameter(sourceType, "t");
+                IEnumerable<MemberBinding> bindings = dynamicType.GetRuntimeProperties().Select(p => Expression.Bind(p, Expression.Property(sourceItem, sourceProperties[p.Name]))).OfType<MemberBinding>();
+
+                return Expression.Lambda<Func<T, object>>(Expression.MemberInit(
+                    Expression.New(dynamicType.GetConstructor(Type.EmptyTypes)), bindings), sourceItem);
+            }
+        }
+        public static Expression CreateExpressionSelectField(Type classType, string propertyName, Type propertyType)
+        {
+            ParameterExpression parameter = Expression.Parameter(classType, "it");
+
+            // 创建属性表达式
+            PropertyInfo propertyInfo = classType.GetProperty(propertyName);
+            MemberExpression property = Expression.Property(parameter, propertyInfo);
+
+            // 创建Lambda表达式
+            Type funcType = typeof(Func<,>).MakeGenericType(classType, propertyType);
+            LambdaExpression lambda = Expression.Lambda(funcType, property, parameter);
+            return lambda;
+        }
+        public static Expression CreateExpressionSelectFieldObject(Type classType, string propertyName)
+        {
+            ParameterExpression parameter = Expression.Parameter(classType, "it");
+
+          
+            PropertyInfo propertyInfo = classType.GetProperty(propertyName);
+            MemberExpression property = Expression.Property(parameter, propertyInfo);
+             
+            UnaryExpression convert = Expression.Convert(property, typeof(object));
+            var funcType = typeof(Func<,>).MakeGenericType(classType, typeof(object));
+            LambdaExpression lambda = Expression.Lambda(funcType, convert, parameter);
+            return lambda;
         }
     }
     internal static class LinqRuntimeTypeBuilder

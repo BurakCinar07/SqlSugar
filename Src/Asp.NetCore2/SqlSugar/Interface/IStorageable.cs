@@ -3,25 +3,41 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 namespace SqlSugar
 {
     public interface IStorageable<T> where T : class, new()
     {
+        IStorageable<T> TableDataRange(Expression<Func<T, bool>> exp);
         IStorageable<T> WhereColumns(Expression<Func<T, object>> columns);
+        IStorageable<T> WhereColumns(Expression<Func<T, object>> columns,Func<DateTime,string> formatTime);
         IStorageable<T> WhereColumns(string [] columns);
+        IStorageable<T> WhereColumns(string[] columns, Func<DateTime, string> formatTime);
         IStorageable<T> SplitInsert(Func<StorageableInfo<T>, bool> conditions, string message=null);
         IStorageable<T> SplitUpdate(Func<StorageableInfo<T>, bool> conditions, string message = null);
         IStorageable<T> Saveable(string inserMessage = null, string updateMessage = null);
         IStorageable<T> SplitError(Func<StorageableInfo<T>, bool> conditions, string message = null);
         IStorageable<T> SplitIgnore(Func<StorageableInfo<T>, bool> conditions, string message = null);
+        IStorageable<T> DisableFilters();
+        IStorageable<T> TranLock(DbLockType LockType = DbLockType.Wait);
+        IStorageable<T> TranLock(DbLockType? LockType);
         IStorageable<T> SplitDelete(Func<StorageableInfo<T>, bool> conditions, string message = null);
         IStorageable<T> SplitOther(Func<StorageableInfo<T>, bool> conditions, string message = null);
         StorageableResult<T> ToStorage();
+        StorageableResult<T> GetStorageableResult();
         Task<StorageableResult<T>> ToStorageAsync();
         IStorageable<T> As(string tableName);
         int ExecuteCommand();
+        T ExecuteReturnEntity();
+        Task<T> ExecuteReturnEntityAsync();
         Task<int> ExecuteCommandAsync();
+        Task<int> ExecuteCommandAsync(CancellationToken cancellationToken);
+        int ExecuteSqlBulkCopy();
+        Task<int> ExecuteSqlBulkCopyAsync();
+        IStorageable<T> DefaultAddElseUpdate();
+        StorageableSplitProvider<T> SplitTable();
+        StorageablePage<T> PageSize(int PaegSize, Action<int> ActionCallBack = null);
     }
 
     public class StorageableInfo<T> where T : class, new()
@@ -53,13 +69,13 @@ namespace SqlSugar
             var rightValue = Item.GetType().GetProperty(pk).GetValue(Item, null);
             var left = leftValue.ObjToString();
             var rigth = rightValue.ObjToString();
-            if (it.GetType().GetProperty(pk).PropertyType == UtilConstants.DecType)
+            if (leftValue!=null&& (leftValue is decimal||leftValue is decimal?))
             {
                 return Convert.ToDecimal(leftValue) == Convert.ToDecimal(rightValue);
             }
             else
             {
-                return left == rigth;
+                return left.EqualCase(rigth);
             }
         }
 

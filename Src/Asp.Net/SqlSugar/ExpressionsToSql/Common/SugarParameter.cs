@@ -11,6 +11,8 @@ namespace SqlSugar
     {
         public bool IsRefCursor { get; set; }
         public bool IsClob { get; set; }
+        public bool IsNClob { get; set; }
+        public bool IsNvarchar2 { get; set; }
         public SugarParameter(string name, object value)
         {
             this.Value = value;
@@ -109,6 +111,10 @@ namespace SqlSugar
             {
                 this.DbType = System.Data.DbType.Byte;
             }
+            else if (type == UtilConstants.SByteType)
+            {
+                this.DbType = System.Data.DbType.SByte;
+            }
             else if (type == UtilConstants.FloatType)
             {
                 this.DbType = System.Data.DbType.Single;
@@ -149,9 +155,27 @@ namespace SqlSugar
             {
                 this.DbType = System.Data.DbType.UInt64;
             }
+            else if (type == UtilConstants.UShortType)
+            {
+                this.DbType = System.Data.DbType.UInt16;
+            }
             else if (type == UtilConstants.ShortType)
             {
                 this.DbType = System.Data.DbType.UInt16;
+            }
+            else if (type?.Name == "TimeOnly")
+            {
+                this.DbType = System.Data.DbType.Time;
+                this.Value =UtilMethods.TimeOnlyToTimeSpan(this.Value);
+            }
+            else if (type?.Name == "DateOnly")
+            {
+                this.DbType = System.Data.DbType.Date;
+                this.Value =Convert.ToDateTime(UtilMethods.DateOnlyToDateTime(this.Value));
+            }
+            else if (type?.FullName == "Newtonsoft.Json.Linq.JObject" || type?.FullName == "Newtonsoft.Json.Linq.JArray" || type?.FullName == "Newtonsoft.Json.Linq.JValue")
+            {
+                this.Value =this.Value==null?default(string):this.Value.ObjToString() ;
             }
 
         }
@@ -182,6 +206,11 @@ namespace SqlSugar
         public override string ParameterName
         {
             get; set;
+        }
+
+        public override byte Scale
+        {
+            get;set;
         }
 
         public int _Size;
@@ -255,5 +284,6 @@ namespace SqlSugar
         public string TypeName { get; set; }
         public bool IsJson { get;  set; }
         public bool IsArray { get;  set; }
+        public object CustomDbType { get; set; }
     }
 }

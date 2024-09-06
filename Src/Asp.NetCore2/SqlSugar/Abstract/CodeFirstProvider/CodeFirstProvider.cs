@@ -10,10 +10,12 @@ namespace SqlSugar
     public partial class CodeFirstProvider : ICodeFirst
     {
         #region Properties
+        internal static object LockObject = new object();
         public virtual SqlSugarProvider Context { get; set; }
         protected bool IsBackupTable { get; set; }
         protected int MaxBackupDataRows { get; set; }
         protected virtual int DefultLength { get; set; }
+        protected Dictionary<Type, string> MappingTables = new Dictionary<Type, string>();
         public CodeFirstProvider()
         {
             if (DefultLength == 0)
@@ -28,6 +30,7 @@ namespace SqlSugar
         {
             var result = new SplitCodeFirstProvider();
             result.Context = this.Context;
+            result.DefaultLength = this.DefultLength;
             return result;
         }
 
@@ -43,32 +46,67 @@ namespace SqlSugar
             DefultLength = length;
             return this;
         }
-
+        public void InitTablesWithAttr(params Type[] entityTypes) 
+        {
+            foreach (var item in entityTypes)
+            {
+                var attr = item.GetCustomAttribute<TenantAttribute>();
+                if (attr==null||this.Context?.Root == null)
+                {
+                    this.Context.CodeFirst.InitTables(item);
+                }
+                else
+                {
+                    var newDb = this.Context.Root.GetConnectionWithAttr(item);
+                    newDb.CodeFirst.InitTables(item);
+                }
+            }
+        }
         public virtual void InitTables(Type entityType)
         {
-
-            //this.Context.Utilities.RemoveCacheAll();
-            this.Context.InitMappingInfoNoCache(entityType);
-            if (!this.Context.DbMaintenance.IsAnySystemTablePermissions())
+            var splitTableAttribute = entityType.GetCustomAttribute<SplitTableAttribute>();
+            if (splitTableAttribute != null) 
             {
-                Check.Exception(true, "Dbfirst and  Codefirst requires system table permissions");
-            }
-            Check.Exception(this.Context.IsSystemTablesConfig, "Please set SqlSugarClent Parameter ConnectionConfig.InitKeyType=InitKeyType.Attribute ");
-
-            if (this.Context.Ado.Transaction == null)
-            {
-                var executeResult = Context.Ado.UseTran(() =>
+                var mappingInfo=this.Context.MappingTables.FirstOrDefault(it => it.EntityName == entityType.Name);
+                if (mappingInfo == null) 
                 {
-                    Execute(entityType);
-                });
-                Check.Exception(!executeResult.IsSuccess, executeResult.ErrorMessage);
+                    UtilMethods.StartCustomSplitTable(this.Context,entityType);
+                    this.Context.CodeFirst.SplitTables().InitTables(entityType);
+                    this.Context.MappingTables.RemoveAll(it=>it.EntityName==entityType.Name);
+                    UtilMethods.EndCustomSplitTable(this.Context, entityType);
+                    return;
+                }
             }
-            else 
+            //Prevent concurrent requests if used in your program
+            lock (CodeFirstProvider.LockObject)
             {
-                Execute(entityType);
+                MappingTableList oldTableList = CopyMappingTalbe();
+                //this.Context.Utilities.RemoveCacheAll();
+                var entityInfo=this.Context.GetEntityNoCacheInitMappingInfo(entityType);
+                if (!this.Context.DbMaintenance.IsAnySystemTablePermissions())
+                {
+                    Check.Exception(true, "Dbfirst and  Codefirst requires system table permissions");
+                }
+                Check.Exception(this.Context.IsSystemTablesConfig, "Please set SqlSugarClent Parameter ConnectionConfig.InitKeyType=InitKeyType.Attribute ");
+
+                if (this.Context.Ado.Transaction == null)
+                {
+                    var executeResult = Context.Ado.UseTran(() =>
+                    {
+                        Execute(entityType,entityInfo);
+                    });
+                    Check.Exception(!executeResult.IsSuccess, executeResult.ErrorMessage);
+                }
+                else
+                {
+                    Execute(entityType, entityInfo);
+                }
+
+                RestMappingTables(oldTableList);
             }
 
         }
+
         public void InitTables<T>()
         {
             InitTables(typeof(T));
@@ -84,6 +122,10 @@ namespace SqlSugar
         public void InitTables<T, T2, T3, T4>()
         {
             InitTables(typeof(T), typeof(T2), typeof(T3), typeof(T4));
+        }
+        public void InitTables<T, T2, T3, T4,T5>()
+        {
+            InitTables(typeof(T), typeof(T2), typeof(T3), typeof(T4),typeof(T5));
         }
         public virtual void InitTables(params Type[] entityTypes)
         {
@@ -103,6 +145,23 @@ namespace SqlSugar
                 }
             }
         }
+        public ICodeFirst As(Type type, string newTableName) 
+        {
+            if (!MappingTables.ContainsKey(type)) 
+            {
+                MappingTables.Add(type,newTableName);
+            }
+            else  
+            {
+                MappingTables[type]= newTableName;
+            }
+            return this;
+        }
+        public ICodeFirst As<T>(string newTableName)
+        {
+            return As(typeof(T),newTableName);
+        }
+
         public virtual void InitTables(string entitiesNamespace)
         {
             var types = Assembly.Load(entitiesNamespace).GetTypes();
@@ -150,12 +209,20 @@ namespace SqlSugar
             db.MappingTables.Add(type.Name, tempTableName);
             try
             {
-                db.CodeFirst.InitTables(type);
+
+                var codeFirst=db.CodeFirst;
+                codeFirst.SetStringDefaultLength(this.DefultLength);
+                codeFirst.InitTables(type);
                 var tables = db.DbMaintenance.GetTableInfoList(false);
                 var oldTableInfo = tables.FirstOrDefault(it=>it.Name.EqualCase(oldTableName));
                 var newTableInfo = tables.FirstOrDefault(it => it.Name.EqualCase(oldTableName));
                 var oldTable = db.DbMaintenance.GetColumnInfosByTableName(oldTableName, false);
                 var tempTable = db.DbMaintenance.GetColumnInfosByTableName(tempTableName, false);
+                if (oldTableInfo == null)
+                {
+                    oldTableInfo =new DbTableInfo() { Name = "还未创建:" + oldTableName };
+                    newTableInfo = new DbTableInfo() { Name = "还未创建:" + oldTableName };
+                }
                 result.tableInfos.Add(new DiffTableInfo()
                 {
                      OldTableInfo= oldTableInfo,
@@ -173,9 +240,25 @@ namespace SqlSugar
                 db.DbMaintenance.DropTable(tempTableName);
             }
         }
-        protected virtual void Execute(Type entityType)
+        protected virtual void Execute(Type entityType,EntityInfo entityInfo)
         {
-            var entityInfo = this.Context.EntityMaintenance.GetEntityInfoNoCache(entityType);
+            //var entityInfo = this.Context.EntityMaintenance.GetEntityInfoNoCache(entityType);
+            if (entityInfo.Discrimator.HasValue())
+            {
+                Check.ExceptionEasy(!Regex.IsMatch(entityInfo.Discrimator, @"^(?:\w+:\w+)(?:,\w+:\w+)*$"), "The format should be type:cat for this type, and if there are multiple, it can be FieldName:cat,FieldName2:dog ", "格式错误应该是type:cat这种格式，如果是多个可以FieldName:cat,FieldName2:dog，不要有空格");
+                var array = entityInfo.Discrimator.Split(',');
+                foreach (var disItem in array)
+                {
+                    var name = disItem.Split(':').First();
+                    var value = disItem.Split(':').Last();
+                    entityInfo.Columns.Add(new EntityColumnInfo() {  PropertyInfo=typeof(DiscriminatorObject).GetProperty(nameof(DiscriminatorObject.FieldName)),IsOnlyIgnoreUpdate = true, DbColumnName = name, UnderType = typeof(string), PropertyName = name, Length = 50 });
+                }
+            }
+            if (this.MappingTables.ContainsKey(entityType)) 
+            {
+                entityInfo.DbTableName = this.MappingTables[entityType];
+                this.Context.MappingTables.Add(entityInfo.EntityName, entityInfo.DbTableName);
+            }
             if (this.DefultLength > 0)
             {
                 foreach (var item in entityInfo.Columns)
@@ -193,13 +276,27 @@ namespace SqlSugar
                         {
                             item.DataType = mappingType;
                         }
+                        if (item.DataType == "varcharmax") 
+                        {
+                            item.DataType = "nvarchar(max)";
+                        }
                     }
                 }
             }
             var tableName = GetTableName(entityInfo);
             this.Context.MappingTables.Add(entityInfo.EntityName, tableName);
             entityInfo.DbTableName = tableName;
-            entityInfo.Columns.ForEach(it => { it.DbTableName = tableName; });
+            entityInfo.Columns.ForEach(it => {
+                it.DbTableName = tableName;
+                if (it.UnderType?.Name == "DateOnly" && it.DataType == null)
+                {
+                    it.DataType = "Date";
+                }
+                if (it.UnderType?.Name == "TimeOnly" && it.DataType == null)
+                {
+                    it.DataType = "Time";
+                }
+            });
             var isAny = this.Context.DbMaintenance.IsAnyTable(tableName, false);
             if (isAny && entityInfo.IsDisabledUpdateAll)
             {
@@ -224,22 +321,59 @@ namespace SqlSugar
                 {
                     if (entityInfo.Type.GetCustomAttribute<SplitTableAttribute>() != null) 
                     {
-                        item.IndexName = item.IndexName + entityInfo.DbTableName;
+                        if (item.IndexName?.Contains("{split_table}") == true)
+                        {
+                            item.IndexName = item.IndexName.Replace("{split_table}", entityInfo.DbTableName);
+                        }
+                        else
+                        {
+                            item.IndexName = item.IndexName + entityInfo.DbTableName;
+                        }
+                    }
+                    if (this.Context.CurrentConnectionConfig.IndexSuffix.HasValue()) 
+                    {
+                        item.IndexName = (this.Context.CurrentConnectionConfig.IndexSuffix+ item.IndexName);
+                    }
+                    var include = "";
+                    if (item.IndexName != null)
+                    {
+                        var database = "{db}";
+                        if (item.IndexName.Contains(database))
+                        {
+                            item.IndexName = item.IndexName.Replace(database, this.Context.Ado.Connection.Database);
+                        }
+                        var table = "{table}";
+                        if (item.IndexName.Contains(table))
+                        {
+                            item.IndexName = item.IndexName.Replace(table, entityInfo.DbTableName);
+                        }
+                        if (item.IndexName.ToLower().Contains("{include:")) 
+                        {
+                            include=Regex.Match( item.IndexName,@"\{include\:.+$").Value;
+                            item.IndexName = item.IndexName.Replace(include, "");
+                        }
+                        if (item.IndexName.Contains(".")&& item.IndexName.Contains("["))
+                        {
+                            item.IndexName = item.IndexName.Replace(".","_");
+                            item.IndexName = item.IndexName.Replace("[", "").Replace("]", "");
+                        }
                     }
                     if (!this.Context.DbMaintenance.IsAnyIndex(item.IndexName))
                     {
+                        var querybulder = InstanceFactory.GetSqlbuilder(this.Context.CurrentConnectionConfig);
+                        querybulder.Context = this.Context;
                         var fileds = item.IndexFields
                             .Select(it =>
                             {
                                 var dbColumn = entityInfo.Columns.FirstOrDefault(z => z.PropertyName == it.Key);
-                                if (dbColumn == null)
+                                if (dbColumn == null&&entityInfo.Discrimator==null)
                                 {
                                     Check.ExceptionEasy($"{entityInfo.EntityName} no   SugarIndex[ {it.Key} ]  found", $"类{entityInfo.EntityName} 索引特性没找到列 ：{it.Key}");
                                 }
                                 return new KeyValuePair<string, OrderByType>(dbColumn.DbColumnName, it.Value);
                             })
-                            .Select(it => it.Key + " " + it.Value).ToArray();
-                        this.Context.DbMaintenance.CreateIndex(entityInfo.DbTableName, fileds, item.IndexName, item.IsUnique);
+                            .Select(it => querybulder.GetTranslationColumnName(it.Key) + " " + it.Value).ToArray();
+                        this.Context.DbMaintenance.CreateIndex(entityInfo.DbTableName, fileds, item.IndexName+ include, item.IsUnique);
                     }
                 }
             }
@@ -256,6 +390,11 @@ namespace SqlSugar
                 {
                     DbColumnInfo dbColumnInfo = EntityColumnToDbColumn(entityInfo, tableName, item);
                     columns.Add(dbColumnInfo);
+                }
+                if (entityInfo.IsCreateTableFiledSort)
+                {
+                    columns = columns.OrderBy(c => c.CreateTableFieldSort).ToList();
+                    columns = columns.OrderBy(it => it.IsPrimarykey ? 0 : 1).ToList();
                 }
             }
             this.Context.DbMaintenance.CreateTable(tableName, columns, true);
@@ -278,12 +417,26 @@ namespace SqlSugar
                                           .Where(ec => ec.OldDbColumnName.IsNullOrEmpty() || !dbColumns.Any(dc => dc.DbColumnName.Equals(ec.OldDbColumnName, StringComparison.CurrentCultureIgnoreCase)))
                                           .Where(ec => !dbColumns.Any(dc => ec.DbColumnName.Equals(dc.DbColumnName, StringComparison.CurrentCultureIgnoreCase))).ToList();
                 var alterColumns = entityColumns
+                                           .Where(it=>it.IsDisabledAlterColumn==false)
                                            .Where(ec => !dbColumns.Any(dc => dc.DbColumnName.Equals(ec.OldDbColumnName, StringComparison.CurrentCultureIgnoreCase)))
                                            .Where(ec =>
-                                                          dbColumns.Any(dc => dc.DbColumnName.Equals(ec.DbColumnName)
+                                                          dbColumns.Any(dc => dc.DbColumnName.EqualCase(ec.DbColumnName)
                                                                && ((ec.Length != dc.Length && !UtilMethods.GetUnderType(ec.PropertyInfo).IsEnum() && UtilMethods.GetUnderType(ec.PropertyInfo).IsIn(UtilConstants.StringType)) ||
                                                                     ec.IsNullable != dc.IsNullable ||
+                                                                    IsNoSamePrecision(ec, dc) ||
                                                                     IsNoSamgeType(ec, dc)))).ToList();
+                 
+                alterColumns.RemoveAll(entityColumnInfo =>
+                {
+                    var bigStringArray = StaticConfig.CodeFirst_BigString.Replace("varcharmax", "nvarchar(max)").Split(',');
+                    var dbColumnInfo = dbColumns.FirstOrDefault(dc => dc.DbColumnName.EqualCase(entityColumnInfo.DbColumnName));
+                    var isMaxString = (dbColumnInfo?.Length == -1 && dbColumnInfo?.DataType?.EqualCase("nvarchar")==true);
+                    var isRemove =
+                           dbColumnInfo != null
+                           && bigStringArray.Contains(entityColumnInfo.DataType)
+                           && isMaxString;
+                    return isRemove;
+                });
                 var renameColumns = entityColumns
                     .Where(it => !string.IsNullOrEmpty(it.OldDbColumnName))
                     .Where(entityColumn => dbColumns.Any(dbColumn => entityColumn.OldDbColumnName.Equals(dbColumn.DbColumnName, StringComparison.CurrentCultureIgnoreCase)))
@@ -327,7 +480,7 @@ namespace SqlSugar
                     this.Context.DbMaintenance.RenameColumn(tableName, item.OldDbColumnName, item.DbColumnName);
                     isChange = true;
                 }
-
+                var isAddPrimaryKey = false;
                 foreach (var item in entityColumns)
                 {
                     var dbColumn = dbColumns.FirstOrDefault(dc => dc.DbColumnName.Equals(item.DbColumnName, StringComparison.CurrentCultureIgnoreCase));
@@ -339,6 +492,7 @@ namespace SqlSugar
                         var isAdd = item.IsPrimarykey;
                         if (isAdd)
                         {
+                            isAddPrimaryKey = true;
                             this.Context.DbMaintenance.AddPrimaryKey(tableName, item.DbColumnName);
                         }
                         else
@@ -351,11 +505,28 @@ namespace SqlSugar
                         ChangeKey(entityInfo, tableName, item);
                     }
                 }
+                if (isAddPrimaryKey==false&&entityColumns.Count(it => it.IsPrimarykey)==1&&dbColumns.Count(it => it.IsPrimarykey) ==0) 
+                {
+                    var addPk=entityColumns.First(it => it.IsPrimarykey);
+                    this.Context.DbMaintenance.AddPrimaryKey(tableName, addPk.DbColumnName);
+                }
                 if (isMultiplePrimaryKey)
                 {
                     var oldPkNames = dbColumns.Where(it => it.IsPrimarykey).Select(it => it.DbColumnName.ToLower()).OrderBy(it => it).ToList();
                     var newPkNames = entityColumns.Where(it => it.IsPrimarykey).Select(it => it.DbColumnName.ToLower()).OrderBy(it => it).ToList();
-                    if (!Enumerable.SequenceEqual(oldPkNames, newPkNames))
+                    if (oldPkNames.Count == 0&& newPkNames.Count>1) 
+                    {
+                        try
+                        {
+                            this.Context.DbMaintenance.AddPrimaryKeys(tableName, newPkNames.ToArray());
+                        }
+                        catch (Exception ex)
+                        {
+                            Check.Exception(true, ErrorMessage.GetThrowMessage("The current database does not support changing multiple primary keys. " + ex.Message, "当前数据库不支持修改多主键,"+ex.Message));
+                            throw ex;
+                        }
+                    }
+                    else if (!Enumerable.SequenceEqual(oldPkNames, newPkNames))
                     {
                         Check.Exception(true, ErrorMessage.GetThrowMessage("Modification of multiple primary key tables is not supported. Delete tables while creating", "不支持修改多主键表，请删除表在创建"));
                     }
@@ -365,7 +536,17 @@ namespace SqlSugar
                 {
                     this.Context.DbMaintenance.BackupTable(tableName, tableName + DateTime.Now.ToString("yyyyMMddHHmmss"), MaxBackupDataRows);
                 }
+                ExistLogicEnd(entityColumns);
             }
+        }
+
+        private bool IsNoSamePrecision(EntityColumnInfo ec, DbColumnInfo dc)
+        {
+            if (this.Context.CurrentConnectionConfig.MoreSettings?.EnableCodeFirstUpdatePrecision == true) 
+            {
+                return ec.DecimalDigits != dc.DecimalDigits && ec.UnderType.IsIn(UtilConstants.DobType,UtilConstants.DecType);
+            }
+            return false;
         }
 
         protected virtual void KeyAction(EntityColumnInfo item, DbColumnInfo dbColumn, out bool pkDiff, out bool idEntityDiff)
@@ -385,6 +566,10 @@ namespace SqlSugar
                 this.Context.DbMaintenance.AddPrimaryKey(tableName, item.DbColumnName);
         }
 
+        protected virtual void ExistLogicEnd(List<EntityColumnInfo> dbColumns) 
+        {
+
+        }
         protected virtual void ConvertColumns(List<DbColumnInfo> dbColumns)
         {
 
@@ -392,6 +577,28 @@ namespace SqlSugar
         #endregion
 
         #region Helper methods
+        private void RestMappingTables(MappingTableList oldTableList)
+        {
+            this.Context.MappingTables.Clear();
+            foreach (var table in oldTableList)
+            {
+                this.Context.MappingTables.Add(table.EntityName, table.DbTableName);
+            }
+        }
+        private MappingTableList CopyMappingTalbe()
+        {
+            MappingTableList oldTableList = new MappingTableList();
+            if (this.Context.MappingTables == null) 
+            {
+                this.Context.MappingTables = new MappingTableList();
+            }
+            foreach (var table in this.Context.MappingTables)
+            {
+                oldTableList.Add(table.EntityName, table.DbTableName);
+            }
+            return oldTableList;
+        }
+
         public virtual string GetCreateTableString(EntityInfo entityInfo)
         {
             StringBuilder result = new StringBuilder();
@@ -422,7 +629,8 @@ namespace SqlSugar
                 DefaultValue = item.DefaultValue,
                 ColumnDescription = item.ColumnDescription,
                 Length = item.Length,
-                DecimalDigits = item.DecimalDigits
+                DecimalDigits = item.DecimalDigits,
+                CreateTableFieldSort = item.CreateTableFieldSort
             };
             GetDbType(item, propertyType, result);
             return result;
@@ -478,7 +686,15 @@ namespace SqlSugar
             {
                 return false;
             }
+            if (properyTypeName?.ToLower() == "varchar" && dataType?.ToLower() == "nvarchar")
+            {
+                return false;
+            }
             if (properyTypeName?.ToLower() == "number" && dataType?.ToLower() == "decimal")
+            {
+                return false;
+            }
+            if (this.Context.CurrentConnectionConfig?.MoreSettings?.EnableOracleIdentity==true&&properyTypeName?.ToLower() == "int" && dataType?.ToLower() == "decimal")
             {
                 return false;
             }
@@ -486,7 +702,19 @@ namespace SqlSugar
             {
                 return false;
             }
+            if (properyTypeName?.ToLower() == "int" && dataType?.ToLower() == "int32")
+            {
+                return false;
+            }
             if (properyTypeName?.ToLower() == "date" && dataType?.ToLower() == "datetime")
+            {
+                return false;
+            }
+            if (properyTypeName?.ToLower() == "bigint" && dataType?.ToLower() == "int64")
+            {
+                return false;
+            }
+            if (properyTypeName?.ToLower() == "blob" && dataType?.ToLower() == "byte[]")
             {
                 return false;
             }
@@ -494,12 +722,28 @@ namespace SqlSugar
             {
                 return properyTypeName != dataType;
             }
+            else if (this.Context.CurrentConnectionConfig.DbType == DbType.SqlServer && dataType.EqualCase("timestamp") && properyTypeName.EqualCase("varbinary"))
+            {
+                return false;
+            }
+            else if (properyTypeName.IsIn("int", "long") && dataType.EqualCase("decimal") && dc.Length == 38 && dc.DecimalDigits == 127)
+            {
+                return false;
+            }
+            else if (dataType.EqualCase("numeric") && properyTypeName.EqualCase("decimal"))
+            {
+                return false;
+            }
+            else if (ec.UnderType == UtilConstants.BoolType && dc.OracleDataType?.EqualCase("number")==true) 
+            {
+                return false;
+            }
             else
             {
                 return properyTypeName.ToLower() != dataType.ToLower();
             }
         }
-        private static string GetType(string name)
+        protected  string GetType(string name)
         {
             if (name.IsContainsIn("UInt32", "UInt16", "UInt64"))
             {

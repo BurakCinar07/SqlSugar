@@ -29,6 +29,17 @@ namespace SqlSugar
         #endregion
 
         #region Common Methods
+        public override string GetTableNameString
+        {
+            get
+            {
+                if (this.TableShortName != null&&this.Context.CurrentConnectionConfig?.MoreSettings?.PgSqlIsAutoToLower==false) 
+                {
+                    this.TableShortName = Builder.GetTranslationColumnName(this.TableShortName);
+                }
+                return base.GetTableNameString;
+            }
+        }
         public override bool IsComplexModel(string sql)
         {
             return Regex.IsMatch(sql, @"AS ""\w+\.\w+""")|| Regex.IsMatch(sql, @"AS ""\w+\.\w+\.\w+""");
@@ -37,6 +48,11 @@ namespace SqlSugar
         {
             base.AppendFilter();
             string oldOrderValue = this.OrderByValue;
+            var isNullOrderValue = Skip == 0 && Take == 1 && oldOrderValue == "ORDER BY NOW() ";
+            if (isNullOrderValue) 
+            {
+                this.OrderByValue = null;
+            }
             string result = null;
             sql = new StringBuilder();
             sql.AppendFormat(SqlTemplate, GetSelectValue, GetTableNameString, GetWhereValueString, GetGroupByString + HavingInfos, (Skip != null || Take != null) ? null : GetOrderByString);
@@ -70,6 +86,10 @@ namespace SqlSugar
             {
                 result = result + TranLock;
             }
+            //if (result.Contains("uuid_generate_v4()")) 
+            //{
+            //    result=" CREATE EXTENSION IF NOT EXISTS pgcrypto;CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"; "+ result;
+            //}
             return result;
         }
 
@@ -93,9 +113,13 @@ namespace SqlSugar
                 {
                     this.SelectCacheKey = this.SelectCacheKey + string.Join("-", this.JoinQueryInfos.Select(it => it.TableName));
                 }
-                if (IsDistinct) 
+                if (IsDistinct&&result?.TrimStart()?.StartsWith("distinct ")!=true) 
                 {
                     result = "distinct "+result;
+                }
+                if (this.SubToListParameters != null && this.SubToListParameters.Any())
+                {
+                    result = SubToListMethod(result);
                 }
                 return result;
             }

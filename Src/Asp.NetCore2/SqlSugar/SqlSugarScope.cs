@@ -93,8 +93,19 @@ namespace SqlSugar
         {
             ScopedContext.BeginTran();
         }
-
-        public void ChangeDatabase(dynamic configId)
+        public void BeginTran(IsolationLevel iso)
+        {
+            ScopedContext.BeginTran(iso);
+        }
+        public Task BeginTranAsync()
+        {
+           return ScopedContext.BeginTranAsync();
+        }
+        public async Task BeginTranAsync(IsolationLevel iso)
+        {
+            await ScopedContext.BeginTranAsync(iso);
+        }
+        public void ChangeDatabase(object configId)
         {
             ScopedContext.ChangeDatabase(configId);
         }
@@ -113,7 +124,14 @@ namespace SqlSugar
         {
             ScopedContext.CommitTran();
         }
-
+        public Task CommitTranAsync()
+        {
+           return ScopedContext.CommitTranAsync();
+        }
+        public DeleteMethodInfo DeleteableByObject(object singleEntityObjectOrListObject)
+        {
+            return ScopedContext.DeleteableByObject(singleEntityObjectOrListObject);
+        }
         public IDeleteable<T> Deleteable<T>() where T : class, new()
         {
            return ScopedContext.Deleteable<T>();
@@ -154,11 +172,11 @@ namespace SqlSugar
             ScopedContext.Dispose();
         }
 
-        public SqlSugarProvider GetConnection(dynamic configId)
+        public SqlSugarProvider GetConnection(object configId)
         {
             return ScopedContext.GetConnection(configId);
         }
-        public SqlSugarScopeProvider GetConnectionScope(dynamic configId)
+        public SqlSugarScopeProvider GetConnectionScope(object configId)
         {
             return ScopedContext.GetConnectionScope(configId);
         }
@@ -188,7 +206,10 @@ namespace SqlSugar
         {
             return ScopedContext.GetSimpleClient<T>();
         }
-
+        public RepositoryType GetRepository<RepositoryType>() where RepositoryType : ISugarRepository, new() 
+        {
+            return ScopedContext.GetRepository<RepositoryType>();   
+        }
         public void InitMappingInfo(Type type)
         {
             ScopedContext.InitMappingInfo(type);
@@ -199,6 +220,10 @@ namespace SqlSugar
             ScopedContext.InitMappingInfo<T>();
         }
 
+        public IInsertable<Dictionary<string, object>> InsertableByDynamic(object insertDynamicObject)
+        {
+            return ScopedContext.InsertableByDynamic(insertDynamicObject);
+        }
         public IInsertable<T> Insertable<T>(Dictionary<string, object> columnDictionary) where T : class, new()
         {
             return ScopedContext.Insertable<T>(columnDictionary);
@@ -223,7 +248,10 @@ namespace SqlSugar
         {
             return ScopedContext.Insertable(insertObjs);
         }
-
+        public InsertMethodInfo InsertableByObject(object singleEntityObjectOrListObject)
+        {
+            return ScopedContext.InsertableByObject(singleEntityObjectOrListObject);
+        }
         public void Open()
         {
             ScopedContext.Open();
@@ -440,9 +468,13 @@ namespace SqlSugar
             return ScopedContext.Queryable<T>();
         }
 
-        public ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable) where T : class, new()
+        public ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable)  
         {
             return ScopedContext.Queryable(queryable);
+        }
+        public ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable, string shortName)
+        {
+            return ScopedContext.Queryable(queryable, shortName);
         }
 
         public ISugarQueryable<T> Queryable<T>(string shortName)
@@ -469,7 +501,10 @@ namespace SqlSugar
         {
              ScopedContext.RollbackTran();
         }
-
+        public Task RollbackTranAsync()
+        {
+            return ScopedContext.RollbackTranAsync();
+        }
 
         [Obsolete("use Storageable")]
         public ISaveable<T> Saveable<T>(List<T> saveObjects) where T : class, new()
@@ -566,12 +601,26 @@ namespace SqlSugar
         {
             return ScopedContext.SqlQueryable<T>(sql);
         }
-
+        public IStorageable<T> Storageable<T>(T[] dataList) where T : class, new() 
+        {
+            return ScopedContext.Storageable(dataList);
+        }
+        public StorageableDataTable Storageable(List<Dictionary<string, object>> dictionaryList, string tableName)
+        {
+            return ScopedContext.Storageable(dictionaryList, tableName);
+        }
+        public StorageableDataTable Storageable(Dictionary<string, object> dictionary, string tableName)
+        {
+            return ScopedContext.Storageable(dictionary, tableName);
+        }
         public IStorageable<T> Storageable<T>(List<T> dataList) where T : class, new()
         {
             return ScopedContext.Storageable(dataList);
         }
-
+        public IStorageable<T> Storageable<T>(IList<T> dataList) where T : class, new()
+        {
+            return ScopedContext.Storageable(dataList?.ToList());
+        }
         public IStorageable<T> Storageable<T>(T data) where T : class, new()
         {
             return ScopedContext.Storageable(data);
@@ -580,27 +629,42 @@ namespace SqlSugar
         {
             return ScopedContext.Storageable(data);
         }
+        public StorageableMethodInfo StorageableByObject(object singleEntityObjectOrListObject)
+        {
+            return this.ScopedContext.StorageableByObject(singleEntityObjectOrListObject);
+        }
 
-        public ISugarQueryable<T> Union<T>(List<ISugarQueryable<T>> queryables) where T : class, new()
+        public ISugarQueryable<T> Union<T>(List<ISugarQueryable<T>> queryables) where T : class
         {
             return ScopedContext.Union(queryables);
         }
 
-        public ISugarQueryable<T> Union<T>(params ISugarQueryable<T>[] queryables) where T : class, new()
+        public ISugarQueryable<T> Union<T>(params ISugarQueryable<T>[] queryables) where T : class
         {
             return ScopedContext.Union(queryables);
         }
 
-        public ISugarQueryable<T> UnionAll<T>(List<ISugarQueryable<T>> queryables) where T : class, new()
+        public ISugarQueryable<T> UnionAll<T>(List<ISugarQueryable<T>> queryables) where T : class
         {
             return ScopedContext.UnionAll(queryables);
         }
 
-        public ISugarQueryable<T> UnionAll<T>(params ISugarQueryable<T>[] queryables) where T : class, new()
+        public ISugarQueryable<T> UnionAll<T>(params ISugarQueryable<T>[] queryables) where T : class
         {
             return ScopedContext.UnionAll(queryables);
         }
-
+        public UpdateMethodInfo UpdateableByObject(object singleEntityObjectOrListObject)
+        {
+            return ScopedContext.UpdateableByObject(singleEntityObjectOrListObject);
+        }
+        public UpdateExpressionMethodInfo UpdateableByObject(Type entityType)
+        {
+            return ScopedContext.UpdateableByObject(entityType);
+        }
+        public IUpdateable<Dictionary<string, object>> UpdateableByDynamic(object updateDynamicObject)
+        {
+            return ScopedContext.UpdateableByDynamic(updateDynamicObject);
+        }
         public IUpdateable<T> Updateable<T>() where T : class, new()
         {
             return ScopedContext.Updateable<T>();
@@ -644,6 +708,10 @@ namespace SqlSugar
         {
             return ScopedContext.SplitHelper<T>();
         }
+        public SplitTableContext SplitHelper(Type entityType) 
+        {
+            return ScopedContext.SplitHelper(entityType);
+        }
         public SplitTableContextResult<T> SplitHelper<T>(T data) where T : class, new()
         {
             return ScopedContext.SplitHelper(data);
@@ -676,7 +744,7 @@ namespace SqlSugar
             return ScopedContext.UseTranAsync(action, errorCallBack);
         }
 
-        public bool IsAnyConnection(dynamic configId)
+        public bool IsAnyConnection(object configId)
         {
             return ScopedContext.IsAnyConnection(configId);
         }
@@ -711,6 +779,12 @@ namespace SqlSugar
         {
             return ScopedContext.UpdateableWithAttr<T>(updateObj);
         }
+
+        public IUpdateable<T> UpdateableWithAttr<T>() where T : class, new()
+        {
+            return ScopedContext.UpdateableWithAttr<T>();
+        }
+
         public IUpdateable<T> UpdateableWithAttr<T>(List<T> updateObjs) where T : class, new()
         {
             return ScopedContext.UpdateableWithAttr<T>(updateObjs);
@@ -719,9 +793,133 @@ namespace SqlSugar
         {
             return ScopedContext.DeleteableWithAttr<T>(deleteObj);
         }
+        public IDeleteable<T> DeleteableWithAttr<T>() where T : class, new()
+        {
+            return ScopedContext.DeleteableWithAttr<T>();
+        }
         public IDeleteable<T> DeleteableWithAttr<T>(List<T> deleteObjs) where T : class, new()
         {
             return ScopedContext.DeleteableWithAttr<T>(deleteObjs);
+        }
+ 
+        public InsertNavTaskInit<T, T> InsertNav<T>(T data) where T : class, new()
+        {
+            return ScopedContext.InsertNav(data);
+        }
+        public InsertNavTaskInit<T, T> InsertNav<T>(List<T> datas) where T : class, new()
+        {
+            return ScopedContext.InsertNav(datas);
+        }
+        public InsertNavTaskInit<T, T> InsertNav<T>(T data, InsertNavRootOptions rootOptions) where T : class, new()
+        {
+            return ScopedContext.InsertNav(data, rootOptions);
+        }
+        public InsertNavTaskInit<T, T> InsertNav<T>(List<T> datas, InsertNavRootOptions rootOptions) where T : class, new()
+        {
+            return ScopedContext.InsertNav(datas, rootOptions);
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(T data) where T : class, new()
+        {
+            return ScopedContext.DeleteNav(data);
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(List<T> datas) where T : class, new()
+        {
+            return ScopedContext.DeleteNav(datas);
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(Expression<Func<T, bool>> whereExpression) where T : class, new()
+        {
+            return ScopedContext.DeleteNav(whereExpression);
+        }
+
+
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(T data, DeleteNavRootOptions options) where T : class, new()
+        {
+            return ScopedContext.DeleteNav(data, options);
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(List<T> datas, DeleteNavRootOptions options) where T : class, new()
+        {
+            return ScopedContext.DeleteNav(datas, options);
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(Expression<Func<T, bool>> whereExpression, DeleteNavRootOptions options) where T : class, new()
+        {
+            return ScopedContext.DeleteNav(whereExpression, options);
+        }
+
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(T data) where T : class, new() 
+        {
+            return ScopedContext.UpdateNav(data);
+        }
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(List<T> datas) where T : class, new() 
+        {
+            return ScopedContext.UpdateNav(datas);
+        }
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(T data,UpdateNavRootOptions rootOptions) where T : class, new()
+        {
+            return ScopedContext.UpdateNav(data, rootOptions);
+        }
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(List<T> datas, UpdateNavRootOptions rootOptions) where T : class, new()
+        {
+            return ScopedContext.UpdateNav(datas, rootOptions);
+        }
+        public SqlSugarClient CopyNew() 
+        {
+            var result= new SqlSugarClient(UtilMethods.CopyConfig(this.Ado.Context.CurrentConnectionConfig));
+            result.QueryFilter = this.QueryFilter;
+            if (this.ScopedContext._AllClients != null)
+            {
+                foreach (var item in this.ScopedContext._AllClients)
+                {
+                    if (!result.IsAnyConnection(item.ConnectionConfig.ConfigId))
+                    {
+                        result.AddConnection(UtilMethods.CopyConfig(item.ConnectionConfig));
+                    }
+                }
+            }
+            return result;
+        }
+        public DynamicBuilder DynamicBuilder()
+        {
+            return ScopedContext.DynamicBuilder();
+        }
+        public void Tracking<T>(T data) where T : class, new()
+        {
+            ScopedContext.Tracking(data);
+        }
+        public void Tracking<T>(List<T> datas) where T : class, new()
+        {
+            ScopedContext.Tracking(datas);
+        }
+        public void RemoveConnection(dynamic configId) 
+        {
+            ScopedContext.RemoveConnection(configId);
+        }
+        public Task<SugarAsyncLock> AsyncLock(int timeOutSeconds=30)
+        {
+            return ScopedContext.AsyncLock(timeOutSeconds);
+        }
+        public QueryMethodInfo QueryableByObject(Type entityType)
+        {
+            return ScopedContext.QueryableByObject(entityType);
+        }
+        public QueryMethodInfo QueryableByObject(Type entityType, string shortName)
+        {
+            return ScopedContext.QueryableByObject(entityType, shortName);
+        }
+        public GridSaveProvider<T> GridSave<T>(List<T> oldList, List<T> saveList) where T : class, new()
+        {
+            return ScopedContext.GridSave(oldList, saveList);
+        }
+        public GridSaveProvider<T> GridSave<T>(List<T> saveList) where T : class, new()
+        {
+            return ScopedContext.GridSave(saveList);
+        }
+        public void ClearTracking()
+        {
+            ScopedContext.ClearTracking();
+        }
+        public string[] GetCurrentConfigIds()
+        {
+            return ScopedContext.GetCurrentConfigIds();
         }
     }
 }

@@ -9,6 +9,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml.Schema;
 
 namespace SqlSugar
 {
@@ -18,14 +19,14 @@ namespace SqlSugar
         private SqlSugarProvider _Context = null;
         private string _ThreadId;
         private ConnectionConfig _CurrentConnectionConfig;
-        private List<SugarTenant> _AllClients;
+        internal List<SugarTenant> _AllClients;
         private bool _IsAllTran = false;
         private bool _IsOpen = false;
         private MappingTableList _MappingTables;
         private MappingColumnList _MappingColumns;
         private IgnoreColumnList _IgnoreColumns;
         private IgnoreColumnList _IgnoreInsertColumns;
-
+        private Action<SqlSugarClient> _configAction;
 
         internal Guid? AsyncId { get; set; }
         internal bool? IsSingleInstance { get; set; }
@@ -48,7 +49,25 @@ namespace SqlSugar
             _AllClients = configs.Select(it => new SugarTenant() { ConnectionConfig = it }).ToList(); ;
             _AllClients.First(it => it.ConnectionConfig.ConfigId == config.ConfigId).Context = this.Context;
         }
+        public SqlSugarClient(ConnectionConfig config ,Action<SqlSugarClient> configAction)
+        {
+            _configAction=configAction;
+            Check.Exception(config == null, "ConnectionConfig config is null");
+            InitContext(config);
+            configAction(this);
+        }
 
+        public SqlSugarClient(List<ConnectionConfig> configs, Action<SqlSugarClient> configAction)
+        {
+            _configAction = configAction;
+            Check.Exception(configs.IsNullOrEmpty(), "List<ConnectionConfig> configs is null or count=0");
+            InitConfigs(configs);
+            var config = configs.First();
+            InitContext(config);
+            _AllClients = configs.Select(it => new SugarTenant() { ConnectionConfig = it }).ToList(); ;
+            _AllClients.First(it => it.ConnectionConfig.ConfigId == config.ConfigId).Context = this.Context;
+            configAction(this);
+        }
         #endregion
 
         #region Global variable
@@ -120,9 +139,37 @@ namespace SqlSugar
         {
             return this.Context.GetSimpleClient<T>();
         }
+        public RepositoryType GetRepository<RepositoryType>() where RepositoryType : ISugarRepository , new()  
+        {
+            Type type = typeof(RepositoryType);
+            var isAnyParamter = type.GetConstructors().Any(z => z.GetParameters().Any());
+            object o = null;
+            if (isAnyParamter)
+            {
+                o = Activator.CreateInstance(type, new string[] { null });
+            }
+            else
+            {
+                o = Activator.CreateInstance(type);
+            }
+            var result = (RepositoryType)o;
+            if (result.Context == null)
+            {
+                result.Context = this.Context;
+            }
+            return result;
+        }
         #endregion
 
         #region Insertable
+        public IInsertable<Dictionary<string, object>> InsertableByDynamic(object insertDynamicObject) 
+        {
+            return this.Context.InsertableByDynamic(insertDynamicObject);
+        }
+        public InsertMethodInfo InsertableByObject(object singleEntityObjectOrListObject)
+        {
+            return this.Context.InsertableByObject(singleEntityObjectOrListObject);
+        }
         public IInsertable<T> Insertable<T>(Dictionary<string, object> columnDictionary) where T : class, new()
         {
             return this.Context.Insertable<T>(columnDictionary);
@@ -130,6 +177,10 @@ namespace SqlSugar
 
         public IInsertable<T> Insertable<T>(dynamic insertDynamicObject) where T : class, new()
         {
+            if (insertDynamicObject is IList<T>) 
+            {
+                return this.Context.Insertable<T>((insertDynamicObject as IList<T>).ToList());
+            }
             return this.Context.Insertable<T>(insertDynamicObject);
         }
 
@@ -140,7 +191,11 @@ namespace SqlSugar
 
         public IInsertable<T> Insertable<T>(T insertObj) where T : class, new()
         {
-            Check.Exception(typeof(T).FullName.Contains("System.Collections.Generic.List`"), "  need  where T: class, new() ");
+            Check.ExceptionEasy(typeof(T).FullName.Contains("System.Collections.Generic.List`"), "  need  where T: class, new() ","需要Class,new()约束，并且类属性中不能有required修饰符");
+            if (typeof(T).Name == "Object") 
+            {
+                Check.ExceptionEasy("Object type use db.InsertableByObject(obj).ExecuteCommand()", "检测到T为Object类型，请使用 db.InsertableByObject(obj).ExecuteCommand()，Insertable不支持object，InsertableByObject可以(缺点：功能比较少)");
+            }
             return this.Context.Insertable<T>(insertObj);
         }
 
@@ -153,28 +208,97 @@ namespace SqlSugar
 
         #region Queryable
 
+        #region  Nav CUD
+        public InsertNavTaskInit<T,T> InsertNav<T>(T data) where T : class, new()
+        {
+            return  this.Context.InsertNav(data);
+        }
+        public InsertNavTaskInit<T, T> InsertNav<T>(List<T> datas) where T : class, new()
+        {
+            return this.Context.InsertNav(datas);
+        }
+        public InsertNavTaskInit<T, T> InsertNav<T>(T data, InsertNavRootOptions rootOptions) where T : class, new()
+        {
+            return this.Context.InsertNav(data, rootOptions);
+        }
+        public InsertNavTaskInit<T, T> InsertNav<T>(List<T> datas, InsertNavRootOptions rootOptions) where T : class, new()
+        {
+            return this.Context.InsertNav(datas, rootOptions);
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(T data) where T : class, new()
+        {
+            return this.Context.DeleteNav(data);
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(List<T> datas) where T : class, new()
+        {
+            return this.Context.DeleteNav(datas);
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(Expression<Func<T, bool>> whereExpression) where T : class, new()
+        {
+            return  this.Context.DeleteNav(whereExpression);
+        }
+
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(T data, DeleteNavRootOptions options) where T : class, new()
+        {
+            return this.Context.DeleteNav(data, options);
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(List<T> datas, DeleteNavRootOptions options) where T : class, new()
+        {
+            return this.Context.DeleteNav(datas, options);
+        }
+        public DeleteNavTaskInit<T, T> DeleteNav<T>(Expression<Func<T, bool>> whereExpression, DeleteNavRootOptions options) where T : class, new()
+        {
+            return this.Context.DeleteNav(whereExpression, options);
+        }
+
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(T data) where T : class, new()
+        {
+            return this.Context.UpdateNav(data);
+        }
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(List<T> datas,UpdateNavRootOptions rootOptions) where T : class, new()
+        {
+            return this.Context.UpdateNav(datas, rootOptions);  
+        }
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(T data, UpdateNavRootOptions rootOptions) where T : class, new()
+        {
+            return this.Context.UpdateNav(data,rootOptions);
+        }
+        public UpdateNavTaskInit<T, T> UpdateNav<T>(List<T> datas) where T : class, new()
+        {
+            return this.Context.UpdateNav(datas);
+        }
+        #endregion
+
         #region Union
-        public ISugarQueryable<T> Union<T>(List<ISugarQueryable<T>> queryables) where T : class, new()
+        public ISugarQueryable<T> Union<T>(List<ISugarQueryable<T>> queryables) where T : class 
         {
             return this.Context.Union(queryables);
         }
 
-        public ISugarQueryable<T> Union<T>(params ISugarQueryable<T>[] queryables) where T : class, new()
+        public ISugarQueryable<T> Union<T>(params ISugarQueryable<T>[] queryables) where T : class 
         {
             return this.Context.Union(queryables);
         }
 
-        public ISugarQueryable<T> UnionAll<T>(List<ISugarQueryable<T>> queryables) where T : class, new()
+        public ISugarQueryable<T> UnionAll<T>(List<ISugarQueryable<T>> queryables) where T : class 
         {
             return this.Context.UnionAll(queryables);
         }
 
-        public ISugarQueryable<T> UnionAll<T>(params ISugarQueryable<T>[] queryables) where T : class, new()
+        public ISugarQueryable<T> UnionAll<T>(params ISugarQueryable<T>[] queryables) where T : class 
         {
             return this.Context.UnionAll(queryables);
         }
         #endregion
 
+        public QueryMethodInfo QueryableByObject(Type entityType) 
+        {
+            return this.Context.QueryableByObject(entityType);
+        }
+        public QueryMethodInfo QueryableByObject(Type entityType,string shortName)
+        {
+            return this.Context.QueryableByObject(entityType,shortName);
+        }
         public ISugarQueryable<T> MasterQueryable<T>()
         {
             return this.Context.MasterQueryable<T>();
@@ -398,7 +522,7 @@ namespace SqlSugar
             return this.Context.Queryable<T>();
         }
 
-        public ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable) where T : class, new()
+        public ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable)  
         {
             
             var result= this.Context.Queryable<T>(queryable);
@@ -409,6 +533,10 @@ namespace SqlSugar
             result.QueryBuilder.LambdaExpressions.ParameterIndex = (QueryBuilder.LambdaExpressions.ParameterIndex+ appendIndex);
             return result;
         }
+        public ISugarQueryable<T> Queryable<T>(ISugarQueryable<T> queryable,string shortName)
+        { 
+            return this.Context.Queryable(queryable,shortName);
+        }
 
         public ISugarQueryable<T> Queryable<T>(string shortName)
         {
@@ -418,6 +546,14 @@ namespace SqlSugar
         #endregion
 
         #region Saveable
+        public GridSaveProvider<T> GridSave<T>(List<T> saveList) where T : class, new()
+        {
+           return this.Context.GridSave(saveList);
+        }
+        public GridSaveProvider<T> GridSave<T>(List<T> oldList, List<T> saveList) where T : class, new()
+        {
+            return this.Context.GridSave(oldList, saveList);
+        }
         public StorageableDataTable Storageable(DataTable data)
         {
             return this.Context.Storageable(data);
@@ -428,10 +564,24 @@ namespace SqlSugar
             dt.TableName = tableName;
             return this.Context.Storageable(dt);
         }
+        public StorageableDataTable Storageable(Dictionary<string, object> dictionary, string tableName)
+        {
+            DataTable dt = this.Context.Utilities.DictionaryListToDataTable(new List<Dictionary<string, object>>() { dictionary });
+            dt.TableName = tableName;
+            return this.Context.Storageable(dt);
+        }
 
         public IStorageable<T> Storageable<T>(List<T> dataList) where T : class, new()
         {
             return this.Context.Storageable(dataList);
+        }
+        public IStorageable<T> Storageable<T>(IList<T> dataList) where T : class, new()
+        {
+            return this.Context.Storageable(dataList.ToList());
+        }
+        public IStorageable<T> Storageable<T>(T[] dataList) where T : class, new()
+        {
+            return this.Context.Storageable(dataList?.ToList());
         }
         public IStorageable<T> Storageable<T>(T data) where T : class, new()
         {
@@ -448,6 +598,10 @@ namespace SqlSugar
         public ISaveable<T> Saveable<T>(T saveObject) where T : class, new()
         {
             return this.Context.Saveable(saveObject);
+        }
+        public StorageableMethodInfo StorageableByObject(object singleEntityObjectOrListObject)
+        {
+            return this.Context.StorageableByObject(singleEntityObjectOrListObject);
         }
         #endregion
 
@@ -564,6 +718,18 @@ namespace SqlSugar
         #endregion
 
         #region Updateable
+        public IUpdateable<Dictionary<string, object>> UpdateableByDynamic(object updateDynamicObject)
+        {
+            return this.Context.UpdateableByDynamic(updateDynamicObject);
+        }
+        public UpdateMethodInfo UpdateableByObject(object singleEntityObjectOrListObject)
+        {
+            return this.Context.UpdateableByObject(singleEntityObjectOrListObject);
+        }
+        public UpdateExpressionMethodInfo UpdateableByObject(Type entityType)
+        {
+            return this.Context.UpdateableByObject(entityType);
+        }
         public IUpdateable<T> Updateable<T>() where T : class, new()
         {
             return this.Context.Updateable<T>();
@@ -576,6 +742,10 @@ namespace SqlSugar
 
         public IUpdateable<T> Updateable<T>(dynamic updateDynamicObject) where T : class, new()
         {
+            if (updateDynamicObject is IList<T>) 
+            {
+                return this.Context.Updateable<T>((updateDynamicObject as IList<T>).ToList());
+            }
             return this.Context.Updateable<T>(updateDynamicObject);
         }
 
@@ -612,6 +782,10 @@ namespace SqlSugar
         #endregion
 
         #region Deleteable
+        public DeleteMethodInfo DeleteableByObject(object singleEntityObjectOrListObject)
+        {
+            return this.Context.DeleteableByObject(singleEntityObjectOrListObject);
+        }
         public IDeleteable<T> Deleteable<T>() where T : class, new()
         {
             return this.Context.Deleteable<T>();
@@ -669,6 +843,10 @@ namespace SqlSugar
         #endregion
 
         #region More api
+        public string[] GetCurrentConfigIds()
+        {
+           return _AllClients.Select(it=>it.ConnectionConfig.ConfigId+string.Empty).ToArray();
+        }
         public IContextMethods Utilities { get { return this.Context.Utilities; } set { this.Context.Utilities = value; } }
         public AopProvider Aop => this.Context.Aop;
         public ICodeFirst CodeFirst => this.Context.CodeFirst;
@@ -688,11 +866,28 @@ namespace SqlSugar
         {
             return new SqlSugarTransaction(this);
         }
+        public void RemoveConnection(dynamic configId) 
+        {
+           var removeData= this._AllClients.FirstOrDefault(it => ((object)it.ConnectionConfig.ConfigId).ObjToString()== ((object)configId).ObjToString());
+          object currentId= this.CurrentConnectionConfig.ConfigId;
+            if (removeData != null) 
+            {
+                if (removeData.Context.Ado.IsAnyTran()) 
+                {
+                    Check.ExceptionEasy("RemoveConnection error  has tran",$"删除失败{removeData.ConnectionConfig.ConfigId}存在未提交事务");
+                }
+                else if (((object)removeData.ConnectionConfig.ConfigId).ObjToString()== currentId.ObjToString())
+                {
+                    Check.ExceptionEasy("Default ConfigId cannot be deleted", $"默认库不能删除{removeData.ConnectionConfig.ConfigId}");
+                }
+                this._AllClients.Remove(removeData);
+            }
+        }
         public void AddConnection(ConnectionConfig connection)
         {
             Check.ArgumentNullException(connection, "AddConnection.connection can't be null");
             InitTenant();
-            var db = this._AllClients.FirstOrDefault(it => it.ConnectionConfig.ConfigId == connection.ConfigId);
+            var db = this._AllClients.FirstOrDefault(it => ((object)it.ConnectionConfig.ConfigId).ObjToString() == ((object)connection.ConfigId).ObjToString());
             if (db == null)
             {
                 if (this._AllClients == null)
@@ -719,56 +914,69 @@ namespace SqlSugar
             var configId = attr.configId;
             return this.GetConnection(configId);
         }
+        public SqlSugarProvider GetConnectionWithAttr(Type type)
+        {
+            var attr = type.GetCustomAttribute<TenantAttribute>();
+            if (attr == null)
+                return this.GetConnection(this.CurrentConnectionConfig.ConfigId);
+            var configId = attr.configId;
+            return this.GetConnection(configId);
+        }
         public SqlSugarScopeProvider GetConnectionScopeWithAttr<T>()
         {
             var attr = typeof(T).GetCustomAttribute<TenantAttribute>();
             if (attr == null)
-                return this.GetConnection(this.CurrentConnectionConfig.ConfigId);
+                return this.GetConnectionScope(this.CurrentConnectionConfig.ConfigId);
             var configId = attr.configId;
             return this.GetConnectionScope(configId);
         }
-        public SqlSugarProvider GetConnection(dynamic configId)
+        public SqlSugarProvider GetConnection(object configId)
         {
             InitTenant();
             var db = this._AllClients.FirstOrDefault(it =>Convert.ToString(it.ConnectionConfig.ConfigId) ==Convert.ToString(configId));
             if (db == null)
             {
-                Check.Exception(true, "ConfigId was not found {0}", configId);
+                Check.Exception(true, "ConfigId was not found {0}", configId+"");
             }
             if (db.Context == null)
             {
                 db.Context = new SqlSugarProvider(db.ConnectionConfig);
-                if (_IsAllTran&&db.Context.Ado.Transaction==null) 
-                {
-                    db.Context.Ado.BeginTran();
-                }
             }
             var intiAop=db.Context.Aop;
             if (db.Context.CurrentConnectionConfig.AopEvents == null) 
             {
                 db.Context.CurrentConnectionConfig.AopEvents = new AopEvents();
             }
+            if (_IsAllTran && db.Context.Ado.Transaction == null)
+            {
+                db.Context.Ado.BeginTran();
+            }
+            db.Context.Root = this;
+            if (db.Context.MappingTables == null) 
+            {
+                db.Context.MappingTables = new MappingTableList();
+            }
             return db.Context;
         }
 
-        public SqlSugarScopeProvider GetConnectionScope(dynamic configId)
+        public SqlSugarScopeProvider GetConnectionScope(object configId)
         {
             var conn = GetConnection(configId);
             return new SqlSugarScopeProvider(conn);
         }
-        public bool IsAnyConnection(dynamic configId)
+        public bool IsAnyConnection(object configId)
         {
             InitTenant();
             var db = this._AllClients.FirstOrDefault(it => Convert.ToString(it.ConnectionConfig.ConfigId) == Convert.ToString(configId));
             return db != null;
              
         }
-        public void ChangeDatabase(dynamic configId)
+        public void ChangeDatabase(object configId)
         {
             configId =Convert.ToString(configId);
             var isLog = _Context.Ado.IsEnableLogEvent;
-            Check.Exception(!_AllClients.Any(it =>Convert.ToString( it.ConnectionConfig.ConfigId) == configId), "ConfigId was not found {0}", configId);
-            InitTenant(_AllClients.First(it => Convert.ToString(it.ConnectionConfig.ConfigId )== configId));
+            Check.Exception(!_AllClients.Any(it =>Convert.ToString( it.ConnectionConfig.ConfigId) ==Convert.ToString( configId)), "ConfigId was not found {0}", configId+"");
+            InitTenant(_AllClients.First(it => Convert.ToString(it.ConnectionConfig.ConfigId )==Convert.ToString( configId)));
             if (this._IsAllTran)
                 this.Ado.BeginTran();
             if (this._IsOpen)
@@ -796,6 +1004,25 @@ namespace SqlSugar
             _IsAllTran = true;
             AllClientEach(it => it.Ado.BeginTran());
         }
+        
+        public void BeginTran(IsolationLevel iso)
+        {
+            _IsAllTran = true;
+            AllClientEach(it => it.Ado.BeginTran(iso));
+        }
+
+        public async Task BeginTranAsync()
+        {
+            _IsAllTran = true;
+            await AllClientEachAsync(async it => await it.Ado.BeginTranAsync());
+        }
+        
+        public async Task BeginTranAsync(IsolationLevel iso)
+        {
+            _IsAllTran = true;
+            await AllClientEachAsync(async it => await it.Ado.BeginTranAsync(iso));
+        }
+
         public void CommitTran()
         {
             this.Context.Ado.CommitTran();
@@ -811,6 +1038,25 @@ namespace SqlSugar
                     SugarRetry.Execute(() => it.Ado.CommitTran(), new TimeSpan(0, 0, 5), 3);
                 }
                 
+            });
+            _IsAllTran = false;
+        }
+
+        public async Task CommitTranAsync()
+        {
+            await this.Context.Ado.CommitTranAsync();
+            await AllClientEachAsync(async it =>
+            {
+
+                try
+                {
+                    await it.Ado.CommitTranAsync();
+                }
+                catch
+                {
+                    SugarRetry.Execute(() => it.Ado.CommitTran(), new TimeSpan(0, 0, 5), 3);
+                }
+
             });
             _IsAllTran = false;
         }
@@ -844,10 +1090,10 @@ namespace SqlSugar
             var result = new DbResult<bool>();
             try
             {
-                this.BeginTran();
+                await this.BeginTranAsync();
                 if (action != null)
                     await action();
-                this.CommitTran();
+                await this.CommitTranAsync();
                 result.Data = result.IsSuccess = true;
             }
             catch (Exception ex)
@@ -855,7 +1101,7 @@ namespace SqlSugar
                 result.ErrorException = ex;
                 result.ErrorMessage = ex.Message;
                 result.IsSuccess = false;
-                this.RollbackTran();
+                await this.RollbackTranAsync();
                 if (errorCallBack != null)
                 {
                     errorCallBack(ex);
@@ -934,6 +1180,24 @@ namespace SqlSugar
             });
             _IsAllTran = false;
         }
+        public async Task RollbackTranAsync()
+        {
+            await this.Context.Ado.RollbackTranAsync();
+            await AllClientEachAsync(async it =>
+            {
+
+                try
+                {
+                    await it.Ado.RollbackTranAsync();
+                }
+                catch
+                {
+                    SugarRetry.Execute(() => it.Ado.RollbackTran(), new TimeSpan(0, 0, 5), 3);
+                }
+
+            });
+            _IsAllTran = false;
+        }
         public void Close()
         {
             this.Context.Close();
@@ -965,6 +1229,55 @@ namespace SqlSugar
         #endregion
 
         #region Other method
+        public DynamicBuilder DynamicBuilder()
+        {
+            return this.Context.DynamicBuilder();
+        }
+        public void Tracking<T>(T data) where T : class, new() 
+        {
+            this.Context.Tracking(data);
+        }
+        public void ClearTracking() 
+        {
+            this.Context.ClearTracking();
+        }
+        public void Tracking<T>(List<T> datas) where T : class, new() 
+        {
+            this.Context.Tracking(datas);
+        }
+        public SqlSugarClient CopyNew()
+        {
+
+            if(_AllClients!=null&&_AllClients.Count>1&& _configAction != null)
+            {
+                List<ConnectionConfig> connections = new List<ConnectionConfig>();
+                foreach (var item in _AllClients)
+                {
+                    connections.Add(UtilMethods.CopyConfig(item.ConnectionConfig));
+                }
+                var newDb= new SqlSugarClient(connections, _configAction);
+                newDb.QueryFilter = this.QueryFilter;
+                return newDb;
+            }
+
+            SqlSugarClient result;
+            if(_configAction!=null)
+                result=new SqlSugarClient(UtilMethods.CopyConfig(this.Ado.Context.CurrentConnectionConfig),_configAction);
+            else
+                result = new SqlSugarClient(UtilMethods.CopyConfig(this.Ado.Context.CurrentConnectionConfig));
+            result.QueryFilter = this.QueryFilter;
+            if (_AllClients != null) 
+            {
+                foreach (var item in _AllClients)
+                {
+                    if (!result.IsAnyConnection(item.ConnectionConfig.ConfigId)) 
+                    {
+                        result.AddConnection(UtilMethods.CopyConfig(item.ConnectionConfig)); 
+                    }
+                }
+            }
+            return result;
+        }
         public DateTime GetDate()
         {
             return this.Context.GetDate();
@@ -980,9 +1293,17 @@ namespace SqlSugar
         #endregion
 
         #region Helper
+        public Task<SugarAsyncLock> AsyncLock(int timeOutSeconds = 30)
+        {
+            return this.Context.AsyncLock(timeOutSeconds);
+        }
         public SplitTableContext SplitHelper<T>() where T:class,new()
         {
             return this.Context.SplitHelper<T>();
+        }
+        public SplitTableContext SplitHelper(Type entityType) 
+        {
+            return this.Context.SplitHelper(entityType);
         }
         public SplitTableContextResult<T> SplitHelper<T>(T data) where T : class, new()
         {
@@ -1185,7 +1506,7 @@ namespace SqlSugar
             );
         }
 
-        private void InitContext(ConnectionConfig config)
+        protected virtual void InitContext(ConnectionConfig config)
         {
             var aopIsNull = config.AopEvents == null;
             if (aopIsNull)
@@ -1213,7 +1534,7 @@ namespace SqlSugar
             {
                 if (item.ConfigId == null)
                 {
-                    item.ConfigId = Guid.NewGuid().ToString();
+                    item.ConfigId = "";
                 }
             }
         }
@@ -1233,6 +1554,22 @@ namespace SqlSugar
             }
         }
 
+
+        private async Task AllClientEachAsync(Func<ISqlSugarClient,Task> action)
+        {
+            if (this._AllClients == null)
+            {
+                this._AllClients = new List<SugarTenant>();
+                this._AllClients.Add(new SugarTenant() { ConnectionConfig = this.CurrentConnectionConfig, Context = this.Context });
+            }
+            if (_AllClients.HasValue())
+            {
+                foreach (var item in _AllClients.Where(it => it.Context.HasValue()))
+                {
+                    await action(item.Context);
+                }
+            }
+        }
         private void InitTenant(SugarTenant Tenant)
         {
             if (Tenant.Context == null)
@@ -1247,19 +1584,29 @@ namespace SqlSugar
         #region Tenant Crud
         public ISugarQueryable<T> QueryableWithAttr<T>()
         {
-            return this.GetConnectionWithAttr<T>().Queryable<T>();
+            var result= this.GetConnectionWithAttr<T>().Queryable<T>();
+            result.QueryBuilder.IsCrossQueryWithAttr= true;
+            return result;
         }
         public IInsertable<T> InsertableWithAttr<T>(T insertObj) where T : class, new()
         {
-            return this.GetConnectionWithAttr<T>().Insertable(insertObj);
+            var result= this.GetConnectionWithAttr<T>().Insertable(insertObj);
+            result.InsertBuilder.IsWithAttr = true;
+            return result;
         }
         public IInsertable<T> InsertableWithAttr<T>(List<T> insertObjs) where T : class, new()
         {
-            return this.GetConnectionWithAttr<T>().Insertable(insertObjs);
+            var result= this.GetConnectionWithAttr<T>().Insertable(insertObjs);
+            result.InsertBuilder.IsWithAttr = true;
+            return result;
         }
         public IUpdateable<T> UpdateableWithAttr<T>(T updateObj) where T : class, new()
         {
             return this.GetConnectionWithAttr<T>().Updateable(updateObj);
+        }
+        public IUpdateable<T> UpdateableWithAttr<T>() where T : class, new()
+        {
+            return this.GetConnectionWithAttr<T>().Updateable<T>();
         }
         public IUpdateable<T> UpdateableWithAttr<T>(List<T> updateObjs) where T : class, new()
         {
@@ -1268,6 +1615,10 @@ namespace SqlSugar
         public IDeleteable<T> DeleteableWithAttr<T>(T deleteObject) where T : class, new()
         {
             return this.GetConnectionWithAttr<T>().Deleteable(deleteObject);
+        }
+        public IDeleteable<T> DeleteableWithAttr<T>() where T : class, new()
+        {
+            return this.GetConnectionWithAttr<T>().Deleteable<T>();
         }
         public IDeleteable<T> DeleteableWithAttr<T>(List<T> deleteObjects) where T : class, new()
         {

@@ -318,24 +318,11 @@ namespace SqlSugar
 
         void Error01()
         {
-            Check.Exception(mappers == null, ErrorMessage.GetThrowMessage(expression.ToString() + "no support", "当前表达式" + expression.ToString() + " 不支持，查看导航是否配置正确等 "));
+            Check.Exception(mappers == null, ErrorMessage.GetThrowMessage(expression.ToString() + "no support Check if the navigation is configured correctly or Includes() is missing", "当前表达式" + expression.ToString() + " 不支持，查看导航是否配置正确等或者缺少Includes() "));
         }
         void ThrowTrue(bool isError)
         {
-            Check.Exception(isError, ErrorMessage.GetThrowMessage(expression.ToString() + "no support", "不支持表达式" + expression.ToString() + "  ，查看导航是否配置正确等 "));
+            Check.Exception(isError, ErrorMessage.GetThrowMessage(expression.ToString() + "no support Check if the navigation is configured correctly or Includes() is missing", "不支持表达式" + expression.ToString() + "  ，查看导航是否配置正确等或者缺少Includes() "));
         }
-    }
-
-    public class MapperSql
-    {
-        public string Sql { get; set; }
-    }
-
-    public class MapperExpressionInfo
-    {
-        public Type Type { get; set; }
-        public EntityInfo EntityInfo { get; set; }
-        public string FieldName { get; set; }
-        public string FieldString { get; set; }
     }
 }

@@ -133,6 +133,28 @@ namespace SqlSugar
             var result = dr.GetInt16(i);
             return result;
         }
+        public static Int32? GetMyIntNull(this IDataRecord dr, int i)
+        {
+            if (dr.IsDBNull(i))
+            {
+                return null;
+            }
+            if (dr.GetDataTypeName(i) == "NUMBER") 
+            {
+               return Convert.ToInt32(dr.GetDouble(i));
+            }
+            var result = dr.GetInt32(i);
+            return result;
+        }
+        public static Int32 GetMyInt(this IDataRecord dr, int i)
+        { 
+            if (dr.GetDataTypeName(i) == "NUMBER")
+            {
+                return Convert.ToInt32(dr.GetDouble(i));
+            } 
+            var result = dr.GetInt32(i);
+            return result;
+        }
 
         public static Int32? GetConvertInt32(this IDataRecord dr, int i)
         {
@@ -211,7 +233,7 @@ namespace SqlSugar
             var date = dr.GetValue(i);
             if (date is DateTime)
             {
-               return UtilMethods.GetDateTimeOffsetByDateTime((DateTime)(date));
+               return new DateTimeOffset((DateTime)(date));
             }
             else
             {
@@ -229,7 +251,7 @@ namespace SqlSugar
             var date = dr.GetValue(i);
             if (date is DateTime)
             {
-                return UtilMethods.GetDateTimeOffsetByDateTime((DateTime)(date));
+                return new DateTimeOffset((DateTime)(date));
             }
             else
             {
@@ -302,11 +324,19 @@ namespace SqlSugar
             object value = dr.GetValue(i);
             if (value != null)
             {
-                if (value.GetType() == UtilConstants.DecType)
+                var valueType = value.GetType();
+                if (valueType.IsIn(UtilConstants.FloatType, UtilConstants.DecType, UtilConstants.DobType))
                 {
-                    value = Convert.ToUInt32(value);
+                    if (Convert.ToDecimal(value) < 0)
+                    {
+                        value = Convert.ToInt32(value);
+                    }
+                    else
+                    {
+                        value = Convert.ToUInt32(value);
+                    }
                 }
-                else if (value.GetType() == UtilConstants.StringType)
+                else if (valueType == UtilConstants.StringType)
                 {
                     return (T)Enum.Parse(typeof(T), value.ObjToString());
                 }
@@ -320,11 +350,19 @@ namespace SqlSugar
             object value = dr.GetValue(i);
             if (value != null)
             {
-                if (value.GetType() == UtilConstants.DecType)
+                var valueType = value.GetType();
+                if (valueType.IsIn(UtilConstants.FloatType, UtilConstants.DecType, UtilConstants.DobType))
                 {
-                    value = Convert.ToUInt32(value);
+                    if (Convert.ToDecimal(value) < 0)
+                    {
+                        value = Convert.ToInt32(value);
+                    }
+                    else
+                    {
+                        value = Convert.ToUInt32(value);
+                    }
                 }
-                else if (value.GetType() == UtilConstants.StringType)
+                else if (valueType == UtilConstants.StringType)
                 {
                     return (T)Enum.Parse(typeof(T), value.ObjToString());
                 }

@@ -17,10 +17,21 @@ namespace SqlSugar
         internal string SugarColumns = "SugarColumns";
         internal string SugarErrorMessage = "SugarErrorMessage";
         internal List<DataRow> dbDataList = new List<DataRow>();
+        internal Func<DateTime, string> formatTime;
         List<KeyValuePair<StorageType, Func<DataRow, bool>,string>> whereFuncs = new List<KeyValuePair<StorageType, Func<DataRow, bool>,string>>();
         public StorageableDataTable WhereColumns(string name)
         {
             return WhereColumns(new string[] { name});
+        }
+        public StorageableDataTable WhereColumns(string name, Func<DateTime, string> formatTime)
+        {
+            this.formatTime = formatTime;
+            return WhereColumns(new string[] { name });
+        }
+        public StorageableDataTable WhereColumns(string [] names, Func<DateTime, string> formatTime)
+        {
+            this.formatTime = formatTime;
+            return WhereColumns(names);
         }
         public StorageableDataTable WhereColumns(string[] names)
         {
@@ -32,7 +43,13 @@ namespace SqlSugar
             {
                 List<IConditionalModel> conditList = new List<IConditionalModel>();
                 SetConditList(itemList, Columns, conditList);
-                var addItem = this.Context.Queryable<object>().AS(tableName).Where(conditList).ToDataTable().Rows.Cast<DataRow>().ToList();
+                string selector = null;
+                if (queryable.SqlBuilder.SqlParameterKeyWord == ":") 
+                {
+                    //Oracle driver bug: Error when querying DataTable after dynamically adding columns using '*'.
+                    selector = " * /*" + Guid.NewGuid() + "*/";
+                }
+                var addItem = this.Context.Queryable<object>().AS(tableName).Where(conditList).Select(selector).ToDataTable().Rows.Cast<DataRow>().ToList();
                 this.dbDataList.AddRange(addItem);
             });
             return this;
@@ -174,9 +191,8 @@ namespace SqlSugar
                     {
                         FieldName = name,
                         ConditionalType = ConditionalType.Equal,
-                        FieldValue = value + "",
-                        FieldValueConvertFunc = this.Context.CurrentConnectionConfig.DbType == DbType.PostgreSQL ?
-                                               UtilMethods.GetTypeConvert(value) : null
+                        FieldValue = value.ObjToString(this.formatTime),
+                        CSharpTypeName=value?.GetType()?.Name
                     }));
                     ++i;
                 }
@@ -211,6 +227,10 @@ namespace SqlSugar
                     if (result)
                     {
                         result = row[name].ObjToString() == it[name].ObjToString();
+                        if (result==false&&it[name] != null && it[name].GetType() == UtilConstants.DecType)
+                        {
+                            result= row[name].ObjToDecimal() == it[name].ObjToDecimal();
+                        }
                         if (result == false) 
                         {
                             break;
